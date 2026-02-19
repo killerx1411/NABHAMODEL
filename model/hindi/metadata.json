@@ -1,0 +1,18 @@
+{
+  "language": "Hindi",
+  "best_model": "XGBoost",
+  "results": {
+    "Random Forest": {
+      "cv_mean": 0.2574,
+      "cv_std": 0.0229,
+      "test_acc": 0.2296
+    },
+    "XGBoost": {
+      "cv_mean": 0.4766,
+      "cv_std": 0.0068,
+      "test_acc": 0.4802
+    }
+  },
+  "n_symptoms": 314,
+  "n_diseases": 29
+}
