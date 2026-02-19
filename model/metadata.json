@@ -1,0 +1,22 @@
+{
+  "best_model": "Random Forest",
+  "results": {
+    "Random Forest": {
+      "cv_mean": 1.0,
+      "cv_std": 0.0,
+      "test_acc": 1.0
+    },
+    "XGBoost": {
+      "cv_mean": 1.0,
+      "cv_std": 0.0,
+      "test_acc": 1.0
+    },
+    "Gradient Boosting": {
+      "cv_mean": 1.0,
+      "cv_std": 0.0,
+      "test_acc": 1.0
+    }
+  },
+  "n_symptoms": 131,
+  "n_diseases": 41
+}

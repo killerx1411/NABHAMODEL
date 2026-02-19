@@ -1,0 +1,14 @@
+{
+  "total_cases": 15,
+  "top1_accuracy": 80.0,
+  "top3_accuracy": 93.3,
+  "sources": [
+    "Columbia University NYPH Discharge DB",
+    "WHO Clinical Guidelines",
+    "Mayo Clinic Reference"
+  ],
+  "noise_robustness": {
+    "Missing 1 symptom": "87.5%",
+    "Missing 2 symptoms": "87.5%"
+  }
+}
