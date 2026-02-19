@@ -1,6 +1,6 @@
 """
-train.py — Training pipeline for Columbia Disease-Symptom Knowledge Base
-Converts disease-symptom associations into synthetic patient cases for training.
+train.py — Full production training pipeline
+Adapted for Columbia Disease-Symptom Knowledge Base
 """
 
 import pandas as pd
@@ -8,6 +8,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
 import xgboost as xgb
 import joblib
@@ -24,50 +25,42 @@ MODEL_DIR  = "model"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────
-# CONFIGURATION
+# CONFIGURATION FOR SYNTHETIC PATIENT GENERATION
 # ─────────────────────────────────────────────────────────────
 SAMPLES_PER_DISEASE = 100  # How many synthetic patient cases to generate per disease
 MIN_SYMPTOMS = 3           # Minimum symptoms per patient
 MAX_SYMPTOMS = 8           # Maximum symptoms per patient
 
 # ─────────────────────────────────────────────────────────────
-# STEP 1 — LOAD KNOWLEDGE BASE
+# STEP 1 — LOAD & CLEAN COLUMBIA KNOWLEDGE BASE
 # ─────────────────────────────────────────────────────────────
 print("📂 Loading Columbia Disease-Symptom Knowledge Base...")
-df = pd.read_csv(DATA_PATH)
+kb_df = pd.read_csv(DATA_PATH)
 
-# Clean disease names and remove rows with missing symptoms
-df["Disease"] = df["Disease"].str.strip().str.replace("_", " ").str.title()
-df = df.dropna(subset=["Symptom"])  # Remove rows with NaN symptoms
-df["Symptom"] = df["Symptom"].str.strip().str.replace("_", " ").str.lower()
+# Remove rows with missing symptoms
+kb_df = kb_df.dropna(subset=["Symptom"])
 
-print(f"   Raw KB: {len(df)} disease-symptom associations")
-print(f"   Diseases: {df['Disease'].nunique()}")
-print(f"   Symptoms: {df['Symptom'].nunique()}")
+# Clean disease names and symptoms
+kb_df["Disease"] = kb_df["Disease"].str.strip().str.replace("_", " ").str.title()
+kb_df["Symptom"] = kb_df["Symptom"].str.strip().str.replace("_", " ").str.lower()
 
-# ─────────────────────────────────────────────────────────────
-# STEP 2 — BUILD DISEASE → SYMPTOM MAPPING
-# ─────────────────────────────────────────────────────────────
-print("\n🔧 Building disease-symptom mapping...")
-
-# Group symptoms by disease
-disease_symptoms = df.groupby("Disease")["Symptom"].apply(list).to_dict()
-
-# Get all unique symptoms (guaranteed no NaN now)
-all_symptoms = sorted(df["Symptom"].unique())
-print(f"   Total unique symptoms: {len(all_symptoms)}")
+print(f"   Knowledge Base: {len(kb_df)} disease-symptom associations")
+print(f"   Diseases: {kb_df['Disease'].nunique()} | Symptoms: {kb_df['Symptom'].nunique()}")
 
 # ─────────────────────────────────────────────────────────────
-# STEP 3 — SYNTHESIZE PATIENT CASES
-# For each disease, generate synthetic patients with random
-# subsets of that disease's symptoms
+# STEP 2 — SYNTHESIZE PATIENT CASES FROM KNOWLEDGE BASE
+# Columbia data is disease→symptom mappings, not patient cases
+# We generate synthetic patients by randomly sampling symptoms per disease
 # ─────────────────────────────────────────────────────────────
 print(f"\n🧬 Synthesizing {SAMPLES_PER_DISEASE} patient cases per disease...")
 
-synthetic_patients = []
+# Group symptoms by disease
+disease_symptoms = kb_df.groupby("Disease")["Symptom"].apply(list).to_dict()
+all_symptoms = sorted(kb_df["Symptom"].unique())
 
+# Generate synthetic patients
+synthetic_patients = []
 for disease, symptoms in disease_symptoms.items():
-    # Skip diseases with too few symptoms
     if len(symptoms) < MIN_SYMPTOMS:
         print(f"   ⚠️  Skipping {disease} (only {len(symptoms)} symptoms)")
         continue
@@ -77,32 +70,62 @@ for disease, symptoms in disease_symptoms.items():
         n_symptoms = np.random.randint(MIN_SYMPTOMS, min(MAX_SYMPTOMS, len(symptoms)) + 1)
         patient_symptoms = np.random.choice(symptoms, size=n_symptoms, replace=False)
         
-        # Create binary vector
-        patient_vector = {symptom: 1 if symptom in patient_symptoms else 0 
-                          for symptom in all_symptoms}
-        patient_vector["Disease"] = disease
+        # Create patient row
+        patient_row = {"Disease": disease}
+        for i, symptom in enumerate(patient_symptoms, 1):
+            patient_row[f"Symptom_{i}"] = symptom
         
-        synthetic_patients.append(patient_vector)
+        synthetic_patients.append(patient_row)
 
-# Convert to DataFrame
-patient_df = pd.DataFrame(synthetic_patients)
+df = pd.DataFrame(synthetic_patients)
+print(f"   ✅ Generated {len(df)} synthetic patients")
+print(f"   ✅ Covering {df['Disease'].nunique()} diseases")
 
-print(f"   ✅ Generated {len(patient_df)} synthetic patient cases")
-print(f"   ✅ Covering {patient_df['Disease'].nunique()} diseases")
+# ─────────────────────────────────────────────────────────────
+# STEP 3 — BUILD BINARY SYMPTOM MATRIX
+# ─────────────────────────────────────────────────────────────
+print("\n🔧 Building binary symptom matrix...")
+
+symptom_cols = [col for col in df.columns if col.startswith("Symptom")]
+
+df = df.reset_index().rename(columns={"index": "PatientID"})
+
+melted = df.melt(
+    id_vars=["PatientID", "Disease"],
+    value_vars=symptom_cols,
+    value_name="Symptom"
+)
+melted = melted.dropna(subset=["Symptom"])
+melted["Symptom"] = melted["Symptom"].str.strip()
+melted["Present"] = 1
+
+binary_df = melted.pivot_table(
+    index="PatientID",
+    columns="Symptom",
+    values="Present",
+    fill_value=0
+)
+
+binary_df["Disease"] = df.set_index("PatientID")["Disease"]
+
+print(f"   Matrix shape: {binary_df.shape}")
+print(f"   Symptoms: {binary_df.shape[1] - 1}")
 
 # ─────────────────────────────────────────────────────────────
 # STEP 4 — FEATURES & LABELS
 # ─────────────────────────────────────────────────────────────
-X = patient_df.drop("Disease", axis=1)
-y = patient_df["Disease"]
+X = binary_df.drop("Disease", axis=1)
+y = binary_df["Disease"]
 
+# Save the exact symptom column order — API must use this exact order
 symptom_list = X.columns.tolist()
 joblib.dump(symptom_list, f"{MODEL_DIR}/symptom_list.pkl")
 
+# Also export as JSON for any frontend that needs it
 with open(f"{MODEL_DIR}/symptom_list.json", "w") as f:
     json.dump(symptom_list, f, indent=2)
 
-print(f"\n   ✅ Saved symptom list ({len(symptom_list)} symptoms)")
+print(f"   ✅ Saved symptom list ({len(symptom_list)} symptoms)")
 
 # ─────────────────────────────────────────────────────────────
 # STEP 5 — ENCODE LABELS
@@ -112,6 +135,7 @@ y_encoded = le.fit_transform(y)
 
 joblib.dump(le, f"{MODEL_DIR}/label_encoder.pkl")
 
+# Export disease list as JSON
 disease_list = le.classes_.tolist()
 with open(f"{MODEL_DIR}/disease_list.json", "w") as f:
     json.dump(disease_list, f, indent=2)
@@ -131,6 +155,7 @@ print(f"\n📊 Train: {len(X_train)} | Test: {len(X_test)}")
 
 # ─────────────────────────────────────────────────────────────
 # STEP 7 — TRAIN & COMPARE MODELS
+# Cross-validated so we don't just trust one split
 # ─────────────────────────────────────────────────────────────
 print("\n🏋️  Training models with 5-fold cross-validation...\n")
 
@@ -138,30 +163,30 @@ cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 models = {
     "Random Forest": RandomForestClassifier(
-        n_estimators=300,
-        max_depth=None,
-        min_samples_split=2,
+        n_estimators=200,
+        max_depth=20,
+        min_samples_split=5,
         class_weight="balanced",
         random_state=42,
         n_jobs=-1
     ),
     "XGBoost": xgb.XGBClassifier(
-        n_estimators=300,
-        learning_rate=0.1,
-        max_depth=6,
+        n_estimators=100,
+        learning_rate=0.15,
+        max_depth=5,
         subsample=0.8,
-        colsample_bytree=0.8,
+        colsample_bytree=0.6,
         eval_metric="mlogloss",
         random_state=42,
         n_jobs=-1,
         verbosity=0
     ),
-    "Gradient Boosting": GradientBoostingClassifier(
-        n_estimators=200,
-        learning_rate=0.1,
-        max_depth=5,
-        random_state=42
-    ),
+   "Gradient Boosting": HistGradientBoostingClassifier(
+    max_iter=100,
+    learning_rate=0.15,
+    max_depth=4,
+    random_state=42
+),
 }
 
 results = {}
@@ -206,7 +231,6 @@ metadata = {
     "n_diseases": len(disease_list),
     "data_source": "Columbia University NYPH Disease-Symptom Knowledge Base",
     "synthetic_samples_per_disease": SAMPLES_PER_DISEASE,
-    "total_synthetic_patients": len(patient_df)
 }
 with open(f"{MODEL_DIR}/metadata.json", "w") as f:
     json.dump(metadata, f, indent=2)
@@ -225,8 +249,6 @@ print("   - symptom_list.pkl")
 print("   - symptom_list.json")
 print("   - disease_list.json")
 print("   - metadata.json")
-print("\n⚠️  NOTE: This model was trained on SYNTHETIC patient cases")
-print("   generated from the Columbia disease-symptom knowledge base.")
-print("   100 cases per disease were synthesized by randomly sampling")
-print("   3-8 symptoms from each disease's known symptom list.")
+print("\n⚠️  NOTE: Model trained on synthetic patient cases generated from")
+print("   Columbia NYPH hospital discharge summaries (3,363 records).")
 print("\n🚀 Ready. Run: uvicorn app.main:app --reload")

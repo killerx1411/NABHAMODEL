@@ -1,22 +1,24 @@
 {
-  "best_model": "Random Forest",
+  "best_model": "XGBoost",
   "results": {
     "Random Forest": {
-      "cv_mean": 1.0,
-      "cv_std": 0.0,
-      "test_acc": 1.0
+      "cv_mean": 0.8492,
+      "cv_std": 0.0079,
+      "test_acc": 0.841
     },
     "XGBoost": {
-      "cv_mean": 1.0,
-      "cv_std": 0.0,
-      "test_acc": 1.0
+      "cv_mean": 0.9535,
+      "cv_std": 0.0056,
+      "test_acc": 0.9567
     },
     "Gradient Boosting": {
-      "cv_mean": 1.0,
-      "cv_std": 0.0,
-      "test_acc": 1.0
+      "cv_mean": 0.0279,
+      "cv_std": 0.0248,
+      "test_acc": 0.8004
     }
   },
-  "n_symptoms": 131,
-  "n_diseases": 41
+  "n_symptoms": 400,
+  "n_diseases": 134,
+  "data_source": "Columbia University NYPH Disease-Symptom Knowledge Base",
+  "synthetic_samples_per_disease": 100
 }
