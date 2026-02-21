@@ -12,7 +12,7 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from langdetect import detect
 from fastapi.templating import Jinja2Templates
-from app.interactive_diagnosis import create_session, answer_question
+from app.interactive_diagnosis import create_session, answer_question, add_text_to_session
 import numpy as np
 import pandas as pd
 import joblib
@@ -134,13 +134,22 @@ class PredictResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────
 # SCHEMAS - INTERACTIVE DIAGNOSIS
 # ─────────────────────────────────────────────────────────────
+
+# CHANGED: accepts free-text string instead of a list of symptoms
 class InteractiveStartRequest(BaseModel):
-    symptoms: List[str]
-    
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Text cannot be empty.")
+        return v.strip()
+
     model_config = {
         "json_schema_extra": {
             "examples": [{
-                "symptoms": ["fever", "headache", "vomiting"]
+                "text": "I have fever, headache and vomiting"
             }]
         }
     }
@@ -157,6 +166,28 @@ class InteractiveAnswerRequest(BaseModel):
                 "session_id": "abc-123-def",
                 "symptom": "chills",
                 "answer": True
+            }]
+        }
+    }
+
+
+# NEW: schema for adding more free-text symptoms to an active session
+class InteractiveAddTextRequest(BaseModel):
+    session_id: str
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Text cannot be empty.")
+        return v.strip()
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [{
+                "session_id": "abc-123-def",
+                "text": "I also have chills and sweating"
             }]
         }
     }
@@ -322,7 +353,8 @@ def start_interactive_diagnosis(request: Request, body: InteractiveStartRequest)
     """
     Start an interactive diagnosis session.
     
-    The system will ask follow-up questions to narrow down the diagnosis,
+    Accepts free-text describing symptoms. The system extracts recognized symptoms,
+    then asks follow-up questions to narrow down the diagnosis,
     mimicking how a real doctor conducts a diagnostic interview.
     
     Returns:
@@ -334,36 +366,21 @@ def start_interactive_diagnosis(request: Request, body: InteractiveStartRequest)
     model = request.app.state.model
     le = request.app.state.le
     symptom_list = request.app.state.symptom_list
-    
-    # Validate minimum symptoms
-    if len(body.symptoms) < 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide at least 1 initial symptom to start."
-        )
-    
-    # Normalize symptom names
- # Join user input into one lowercase string
-    text_input = " ".join(body.symptoms).lower()
 
-    # Extract matching symptoms from model vocabulary
-    recognized = [
-        symptom
-        for symptom in symptom_list
-        if symptom.lower() in text_input
-    ]
-    
+    # CHANGED: extract symptoms from free-text using the shared helper
+    recognized = extract_symptoms_from_text(body.text, symptom_list)
+
     if len(recognized) < 1:
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "No recognized symptoms",
-                "provided": body.symptoms,
-                "hint": "Use GET /symptoms to see valid symptom names"
+                "error": "No recognized symptoms found in your text.",
+                "provided_text": body.text,
+                "hint": "Try describing your symptoms more explicitly, e.g. 'I have fever and headache'."
             }
         )
     
-    # Create session
+    # Create session (unchanged)
     result = create_session(model, le, symptom_list, recognized)
     
     return result
@@ -399,6 +416,39 @@ def answer_interactive_question(request: Request, body: InteractiveAnswerRequest
         )
         return result
     
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# NEW: endpoint to add more free-text symptoms to an active session
+@app.post("/predict_interactive/add_text", tags=["Interactive Diagnosis"])
+def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest):
+    """
+    Add more free-text symptoms to an active diagnosis session.
+    
+    Extracts any new symptoms from the provided text and merges them into
+    the existing session without resetting it. Probabilities are recalculated.
+    The MCQ question flow is not affected.
+    
+    Returns:
+        - session_id
+        - updated_predictions: Recalculated top 3 diseases
+        - new_symptoms_added: Symptoms extracted and added from the new text
+    """
+    model = request.app.state.model
+    le = request.app.state.le
+    symptom_list = request.app.state.symptom_list
+
+    try:
+        result = add_text_to_session(
+            body.session_id,
+            body.text,
+            model,
+            le,
+            symptom_list
+        )
+        return result
+
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -458,41 +508,30 @@ def interactive_demo_page():
             border-radius: 5px;
             cursor: pointer;
         }
-        .btn-yes {
-            background: #28a745;
-            color: white;
-        }
-        .btn-no {
-            background: #dc3545;
-            color: white;
-        }
-        .btn-start {
-            background: #007bff;
-            color: white;
-        }
+        .btn-yes { background: #28a745; color: white; }
+        .btn-no { background: #dc3545; color: white; }
+        .btn-start { background: #007bff; color: white; }
+        .btn-add { background: #6f42c1; color: white; }
         input {
             width: 100%;
             padding: 10px;
             font-size: 16px;
             border: 2px solid #ddd;
             border-radius: 5px;
+            box-sizing: border-box;
         }
-        .complete {
-            background: #d4edda;
-            padding: 20px;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
+        .complete { background: #d4edda; padding: 20px; border-radius: 5px; margin: 20px 0; }
+        .add-text-box { background: #f0e6ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🏥 Interactive Disease Diagnosis</h1>
-        <p>This system asks follow-up questions to narrow down your diagnosis, like a real doctor.</p>
+        <p>Describe your symptoms in plain text. The system will ask follow-up questions to narrow down your diagnosis.</p>
         
         <div id="step1" class="step">
-            <h3>Step 1: Enter your initial symptoms</h3>
-            <input type="text" id="symptoms" placeholder="e.g., fever, headache, vomiting (comma-separated)">
+            <h3>Step 1: Describe your symptoms</h3>
+            <input type="text" id="symptoms" placeholder="e.g., I have fever, headache and feel like vomiting">
             <br><br>
             <button class="btn-start" onclick="startDiagnosis()">Start Diagnosis</button>
         </div>
@@ -500,6 +539,13 @@ def interactive_demo_page():
         <div id="step2" class="step" style="display:none;">
             <h3>Current Predictions:</h3>
             <div id="predictions" class="predictions"></div>
+
+            <div class="add-text-box">
+                <strong>Add More Symptoms:</strong>
+                <input type="text" id="addTextInput" placeholder="e.g., I also have chills and sweating">
+                <br><br>
+                <button class="btn-add" onclick="addMoreSymptoms()">➕ Add Symptoms</button>
+            </div>
             
             <div id="questionBox" class="question" style="display:none;">
                 <strong>Question:</strong>
@@ -522,20 +568,21 @@ def interactive_demo_page():
         let currentSymptom = null;
         
         async function startDiagnosis() {
-            const symptoms = document.getElementById('symptoms').value.split(',').map(s => s.trim());
+            const text = document.getElementById('symptoms').value.trim();
+            if (!text) return;
             
             const response = await fetch('/predict_interactive/start', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({symptoms})
+                body: JSON.stringify({ text })
             });
             
             const data = await response.json();
+            if (!response.ok) { alert(JSON.stringify(data.detail)); return; }
+
             sessionId = data.session_id;
-            
             document.getElementById('step1').style.display = 'none';
             document.getElementById('step2').style.display = 'block';
-            
             displayResults(data);
         }
         
@@ -543,24 +590,40 @@ def interactive_demo_page():
             const response = await fetch('/predict_interactive/answer', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    session_id: sessionId,
-                    symptom: currentSymptom,
-                    answer: answer
-                })
+                body: JSON.stringify({ session_id: sessionId, symptom: currentSymptom, answer })
             });
-            
             const data = await response.json();
             displayResults(data);
+        }
+
+        async function addMoreSymptoms() {
+            const text = document.getElementById('addTextInput').value.trim();
+            if (!text) return;
+
+            const response = await fetch('/predict_interactive/add_text', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ session_id: sessionId, text })
+            });
+            const data = await response.json();
+            if (!response.ok) { alert(JSON.stringify(data.detail)); return; }
+
+            document.getElementById('addTextInput').value = '';
+
+            // Update predictions display with the returned updated_predictions
+            const predictions = data.updated_predictions;
+            let html = '';
+            predictions.forEach(p => {
+                html += `<div class="disease"><strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence</div>`;
+            });
+            document.getElementById('predictions').innerHTML = html;
         }
         
         function displayResults(data) {
             const predictions = data.current_predictions || data.final_predictions;
             let html = '';
             predictions.forEach(p => {
-                html += `<div class="disease">
-                    <strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence
-                </div>`;
+                html += `<div class="disease"><strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence</div>`;
             });
             document.getElementById('predictions').innerHTML = html;
             
@@ -592,4 +655,3 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"error": "Internal server error. Please try again."}
     )
-    

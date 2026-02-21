@@ -198,6 +198,20 @@ def should_stop_asking(
 
 
 # ─────────────────────────────────────────────────────────────
+# SYMPTOM EXTRACTION (local copy — avoids circular import with main.py)
+# ─────────────────────────────────────────────────────────────
+
+def _extract_symptoms_from_text(text: str, symptom_list: List[str]) -> List[str]:
+    """
+    Extract recognized symptoms from free-text input.
+    Case-insensitive substring match against the model vocabulary.
+    Identical logic to extract_symptoms_from_text() in main.py.
+    """
+    text_lower = text.lower()
+    return [symptom for symptom in symptom_list if symptom.lower() in text_lower]
+
+
+# ─────────────────────────────────────────────────────────────
 # SESSION MANAGEMENT
 # ─────────────────────────────────────────────────────────────
 
@@ -335,4 +349,68 @@ def answer_question(
         "next_question": next_q,
         "status": "questioning",
         "questions_asked": session["questions_asked"]
+    }
+
+
+def add_text_to_session(
+    session_id: str,
+    text: str,
+    model,
+    le,
+    symptom_list: List[str]
+) -> Dict:
+    """
+    Add more free-text symptoms to an active session without resetting it.
+
+    Extracts newly recognized symptoms from text, merges them into the session's
+    present_symptoms (skipping duplicates), and recalculates probabilities.
+
+    Args:
+        session_id: Active session identifier
+        text: Free-text string describing additional symptoms
+        model: Trained classifier
+        le: Label encoder
+        symptom_list: Full model symptom vocabulary
+
+    Returns:
+        Updated predictions and list of newly added symptoms
+    """
+    if session_id not in SESSIONS:
+        raise ValueError(f"Session {session_id} not found")
+
+    session = SESSIONS[session_id]
+
+    # Extract new symptoms from text using the local extraction helper
+    extracted = _extract_symptoms_from_text(text, symptom_list)
+
+    # Add only symptoms not already present in the session
+    new_symptoms = []
+    for symptom in extracted:
+        if symptom not in session["present_symptoms"]:
+            session["present_symptoms"].append(symptom)
+            new_symptoms.append(symptom)
+
+    # Recompute probabilities using existing prediction logic
+    current_probs = predict_with_symptoms(
+        model,
+        symptom_list,
+        session["present_symptoms"]
+    )
+    session["current_probs"] = current_probs.tolist()
+
+    # Get top diseases
+    top3_idx = np.argsort(current_probs)[::-1][:3]
+    predictions = [
+        {
+            "rank": i + 1,
+            "disease": le.inverse_transform([idx])[0],
+            "confidence": round(float(current_probs[idx]) * 100, 2)
+        }
+        for i, idx in enumerate(top3_idx)
+    ]
+
+    return {
+        "session_id": session_id,
+        "updated_predictions": predictions,
+        "new_symptoms_added": new_symptoms
     }

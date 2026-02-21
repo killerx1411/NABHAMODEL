@@ -35,7 +35,7 @@
         margin-bottom: 30px;
     }
 
-    input {
+    input[type="text"] {
         width: 100%;
         padding: 14px;
         font-size: 16px;
@@ -43,6 +43,8 @@
         border: none;
         margin-top: 10px;
         margin-bottom: 20px;
+        box-sizing: border-box;
+        color: #1a1a2e;
     }
 
     button {
@@ -60,9 +62,7 @@
         font-weight: bold;
     }
 
-    .primary:hover {
-        background: #00aaff;
-    }
+    .primary:hover { background: #00aaff; }
 
     .yes {
         background: #28a745;
@@ -70,10 +70,15 @@
         margin-right: 10px;
     }
 
-    .no {
-        background: #dc3545;
+    .no { background: #dc3545; color: white; }
+
+    .add-btn {
+        background: #7c3aed;
         color: white;
+        font-weight: bold;
     }
+
+    .add-btn:hover { background: #6d28d9; }
 
     .predictions {
         margin-top: 25px;
@@ -95,6 +100,45 @@
         background: rgba(255,255,255,0.1);
         border-radius: 10px;
         font-size: 18px;
+    }
+
+    /* Add More Symptoms panel — always visible once session starts */
+    .add-text-panel {
+        margin-top: 25px;
+        padding: 20px;
+        background: rgba(124, 58, 237, 0.2);
+        border: 1px solid rgba(124, 58, 237, 0.5);
+        border-radius: 10px;
+    }
+
+    .add-text-panel h4 {
+        margin: 0 0 10px 0;
+        font-size: 15px;
+        opacity: 0.9;
+        letter-spacing: 0.03em;
+    }
+
+    .add-text-panel .row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .add-text-panel input[type="text"] {
+        flex: 1;
+        margin: 0;
+    }
+
+    .add-text-panel button {
+        flex-shrink: 0;
+        margin: 0;
+    }
+
+    .added-notice {
+        margin-top: 8px;
+        font-size: 13px;
+        opacity: 0.8;
+        min-height: 18px;
     }
 
     .loading {
@@ -121,22 +165,39 @@
 
 <div class="container">
 
-    <h1>🧠 AI Interactive Diagnosis</h1>
-    <p class="subtitle">Answer a few questions like a real doctor consultation.</p>
+    <h1>AI Interactive Diagnosis</h1>
+    <p class="subtitle">Describe your symptoms in plain text — the system will ask follow-up questions like a real doctor.</p>
 
+    <!-- Step 1: free-text entry -->
     <div id="step1">
-        <label>Enter initial symptoms (comma separated):</label>
-        <input type="text" id="symptomsInput" placeholder="e.g. fever, headache, vomiting">
+        <label>Describe your symptoms:</label>
+        <input type="text" id="symptomsInput"
+               placeholder="e.g. I have fever, headache and I feel like vomiting">
         <button class="primary" onclick="startDiagnosis()">Start Diagnosis</button>
     </div>
 
     <div id="loading" class="loading" style="display:none;">
-        ⏳ Processing...
+        Processing...
     </div>
 
+    <!-- Step 2: session active -->
     <div id="results" style="display:none;">
+
+        <!-- Live predictions -->
         <div class="predictions" id="predictionsBox"></div>
 
+        <!-- Add More Symptoms panel (always shown while session is active) -->
+        <div class="add-text-panel" id="addTextPanel">
+            <h4>➕ Add More Symptoms</h4>
+            <div class="row">
+                <input type="text" id="addTextInput"
+                       placeholder="e.g. I also have chills and sweating">
+                <button class="add-btn" onclick="addMoreSymptoms()">Add</button>
+            </div>
+            <div class="added-notice" id="addedNotice"></div>
+        </div>
+
+        <!-- MCQ question -->
         <div class="question-box" id="questionBox" style="display:none;">
             <div id="questionText"></div>
             <br>
@@ -144,6 +205,7 @@
             <button class="no" onclick="submitAnswer(false)">No</button>
         </div>
 
+        <!-- Diagnosis complete -->
         <div class="complete-box" id="completeBox" style="display:none;">
             <h3>✅ Diagnosis Complete</h3>
             <p id="stopReason"></p>
@@ -161,15 +223,13 @@
 let sessionId = null;
 let currentSymptom = null;
 
+// ── Start session with free-text ──────────────────────────────
 async function startDiagnosis() {
-
-    const input = document.getElementById("symptomsInput").value;
-    if (!input.trim()) {
-        showError("Please enter at least one symptom.");
+    const text = document.getElementById("symptomsInput").value.trim();
+    if (!text) {
+        showError("Please describe your symptoms first.");
         return;
     }
-
-    const symptoms = input.split(",").map(s => s.trim());
 
     toggleLoading(true);
     clearError();
@@ -178,7 +238,8 @@ async function startDiagnosis() {
         const response = await fetch("/predict_interactive/start", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({symptoms})
+            // CHANGED: send { text } instead of { symptoms }
+            body: JSON.stringify({ text })
         });
 
         const data = await response.json();
@@ -200,8 +261,8 @@ async function startDiagnosis() {
     toggleLoading(false);
 }
 
+// ── Yes / No MCQ answer (unchanged flow) ─────────────────────
 async function submitAnswer(answer) {
-
     toggleLoading(true);
     clearError();
 
@@ -231,10 +292,48 @@ async function submitAnswer(answer) {
     toggleLoading(false);
 }
 
-function renderResponse(data) {
+// ── Add more free-text symptoms during active session ─────────
+async function addMoreSymptoms() {
+    const text = document.getElementById("addTextInput").value.trim();
+    if (!text) return;
 
-    const predictions = data.current_predictions || data.final_predictions;
+    const noticeEl = document.getElementById("addedNotice");
+    noticeEl.textContent = "Adding…";
 
+    try {
+        const response = await fetch("/predict_interactive/add_text", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ session_id: sessionId, text })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(JSON.stringify(data.detail));
+        }
+
+        // Clear input
+        document.getElementById("addTextInput").value = "";
+
+        // Update predictions in-place (no page reload)
+        renderPredictions(data.updated_predictions);
+
+        // Show feedback about what was added
+        if (data.new_symptoms_added && data.new_symptoms_added.length > 0) {
+            noticeEl.textContent = "Added: " + data.new_symptoms_added.join(", ");
+        } else {
+            noticeEl.textContent = "No new recognizable symptoms found in that text.";
+        }
+
+    } catch (err) {
+        showError("Error: " + err.message);
+        noticeEl.textContent = "";
+    }
+}
+
+// ── Render helpers ────────────────────────────────────────────
+function renderPredictions(predictions) {
     let html = "";
     predictions.forEach(p => {
         html += `
@@ -244,28 +343,32 @@ function renderResponse(data) {
             </div>
         `;
     });
-
     document.getElementById("predictionsBox").innerHTML = html;
+}
+
+function renderResponse(data) {
+    const predictions = data.current_predictions || data.final_predictions;
+    renderPredictions(predictions);
 
     if (data.status === "questioning" && data.next_question) {
-
         document.getElementById("questionBox").style.display = "block";
         document.getElementById("completeBox").style.display = "none";
-
         document.getElementById("questionText").innerText = data.next_question.question;
         currentSymptom = data.next_question.symptom;
 
     } else {
-
         document.getElementById("questionBox").style.display = "none";
         document.getElementById("completeBox").style.display = "block";
-
         document.getElementById("stopReason").innerText = data.stop_reason || "Diagnosis finished.";
-        document.getElementById("questionsAsked").innerText = 
+        document.getElementById("questionsAsked").innerText =
             "Questions asked: " + (data.questions_asked || 0);
+
+        // Hide the add-text panel once diagnosis is complete
+        document.getElementById("addTextPanel").style.display = "none";
     }
 }
 
+// ── Utility ───────────────────────────────────────────────────
 function toggleLoading(state) {
     document.getElementById("loading").style.display = state ? "block" : "none";
 }
