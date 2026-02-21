@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Interactive Disease Diagnosis</title>
+
+<style>
+    body {
+        font-family: 'Segoe UI', sans-serif;
+        background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+        margin: 0;
+        padding: 0;
+        color: white;
+    }
+
+    .container {
+        max-width: 850px;
+        margin: 60px auto;
+        background: rgba(255,255,255,0.08);
+        backdrop-filter: blur(10px);
+        padding: 40px;
+        border-radius: 15px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+
+    h1 {
+        text-align: center;
+        margin-bottom: 10px;
+    }
+
+    p.subtitle {
+        text-align: center;
+        opacity: 0.8;
+        margin-bottom: 30px;
+    }
+
+    input {
+        width: 100%;
+        padding: 14px;
+        font-size: 16px;
+        border-radius: 8px;
+        border: none;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+
+    button {
+        padding: 12px 25px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 15px;
+        transition: 0.3s;
+    }
+
+    .primary {
+        background: #00c6ff;
+        color: black;
+        font-weight: bold;
+    }
+
+    .primary:hover {
+        background: #00aaff;
+    }
+
+    .yes {
+        background: #28a745;
+        color: white;
+        margin-right: 10px;
+    }
+
+    .no {
+        background: #dc3545;
+        color: white;
+    }
+
+    .predictions {
+        margin-top: 25px;
+        padding: 20px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+    }
+
+    .prediction-item {
+        padding: 10px;
+        margin-bottom: 8px;
+        background: rgba(255,255,255,0.15);
+        border-radius: 6px;
+    }
+
+    .question-box {
+        margin-top: 30px;
+        padding: 20px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 18px;
+    }
+
+    .loading {
+        text-align: center;
+        margin-top: 20px;
+        opacity: 0.8;
+    }
+
+    .complete-box {
+        margin-top: 30px;
+        padding: 20px;
+        background: rgba(40,167,69,0.2);
+        border-radius: 10px;
+    }
+
+    .error {
+        margin-top: 20px;
+        color: #ffcccc;
+    }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>🧠 AI Interactive Diagnosis</h1>
+    <p class="subtitle">Answer a few questions like a real doctor consultation.</p>
+
+    <div id="step1">
+        <label>Enter initial symptoms (comma separated):</label>
+        <input type="text" id="symptomsInput" placeholder="e.g. fever, headache, vomiting">
+        <button class="primary" onclick="startDiagnosis()">Start Diagnosis</button>
+    </div>
+
+    <div id="loading" class="loading" style="display:none;">
+        ⏳ Processing...
+    </div>
+
+    <div id="results" style="display:none;">
+        <div class="predictions" id="predictionsBox"></div>
+
+        <div class="question-box" id="questionBox" style="display:none;">
+            <div id="questionText"></div>
+            <br>
+            <button class="yes" onclick="submitAnswer(true)">Yes</button>
+            <button class="no" onclick="submitAnswer(false)">No</button>
+        </div>
+
+        <div class="complete-box" id="completeBox" style="display:none;">
+            <h3>✅ Diagnosis Complete</h3>
+            <p id="stopReason"></p>
+            <p id="questionsAsked"></p>
+            <button class="primary" onclick="resetApp()">Start Again</button>
+        </div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+
+</div>
+
+<script>
+
+let sessionId = null;
+let currentSymptom = null;
+
+async function startDiagnosis() {
+
+    const input = document.getElementById("symptomsInput").value;
+    if (!input.trim()) {
+        showError("Please enter at least one symptom.");
+        return;
+    }
+
+    const symptoms = input.split(",").map(s => s.trim());
+
+    toggleLoading(true);
+    clearError();
+
+    try {
+        const response = await fetch("/predict_interactive/start", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({symptoms})
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(JSON.stringify(data.detail));
+        }
+
+        sessionId = data.session_id;
+        document.getElementById("step1").style.display = "none";
+        document.getElementById("results").style.display = "block";
+
+        renderResponse(data);
+
+    } catch (err) {
+        showError("Error: " + err.message);
+    }
+
+    toggleLoading(false);
+}
+
+async function submitAnswer(answer) {
+
+    toggleLoading(true);
+    clearError();
+
+    try {
+        const response = await fetch("/predict_interactive/answer", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                session_id: sessionId,
+                symptom: currentSymptom,
+                answer: answer
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(JSON.stringify(data.detail));
+        }
+
+        renderResponse(data);
+
+    } catch (err) {
+        showError("Error: " + err.message);
+    }
+
+    toggleLoading(false);
+}
+
+function renderResponse(data) {
+
+    const predictions = data.current_predictions || data.final_predictions;
+
+    let html = "";
+    predictions.forEach(p => {
+        html += `
+            <div class="prediction-item">
+                <strong>#${p.rank} ${p.disease}</strong><br>
+                Confidence: ${p.confidence}%
+            </div>
+        `;
+    });
+
+    document.getElementById("predictionsBox").innerHTML = html;
+
+    if (data.status === "questioning" && data.next_question) {
+
+        document.getElementById("questionBox").style.display = "block";
+        document.getElementById("completeBox").style.display = "none";
+
+        document.getElementById("questionText").innerText = data.next_question.question;
+        currentSymptom = data.next_question.symptom;
+
+    } else {
+
+        document.getElementById("questionBox").style.display = "none";
+        document.getElementById("completeBox").style.display = "block";
+
+        document.getElementById("stopReason").innerText = data.stop_reason || "Diagnosis finished.";
+        document.getElementById("questionsAsked").innerText = 
+            "Questions asked: " + (data.questions_asked || 0);
+    }
+}
+
+function toggleLoading(state) {
+    document.getElementById("loading").style.display = state ? "block" : "none";
+}
+
+function showError(msg) {
+    document.getElementById("errorBox").innerText = msg;
+}
+
+function clearError() {
+    document.getElementById("errorBox").innerText = "";
+}
+
+function resetApp() {
+    location.reload();
+}
+
+</script>
+
+</body>
+</html>
