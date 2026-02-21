@@ -12,7 +12,7 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from langdetect import detect
 from fastapi.templating import Jinja2Templates
-from app.interactive_diagnosis import create_session, answer_question, add_text_to_session
+from app.interactive_diagnosis import create_session, answer_question, add_text_to_session, SESSIONS
 import numpy as np
 import pandas as pd
 import joblib
@@ -102,6 +102,58 @@ app.add_middleware(
 )
 
 # ─────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────
+def detect_language(text: str) -> str:
+    """Detect language from text. Returns 'en', 'hi', or 'pa'."""
+    try:
+        lang = detect(text)
+        if lang in ['hi', 'mr', 'ne']:  # Devanagari-script languages → treat as Hindi
+            return 'hi'
+        elif lang in ['pa']:
+            return 'pa'
+        else:
+            return 'en'
+    except Exception:
+        return 'en'  # Default to English
+
+
+def confidence_label(score: float) -> str:
+    if score >= 70:
+        return "High"
+    elif score >= 40:
+        return "Moderate"
+    return "Low"
+
+
+def extract_symptoms_from_text(text: str, symptom_list: List[str]) -> List[str]:
+    """
+    Extract symptoms from natural language text by case-insensitive substring match.
+    """
+    text_lower = text.lower()
+    return [symptom for symptom in symptom_list if symptom.lower() in text_lower]
+
+
+def _resolve_model(request: Request, lang: str):
+    """
+    Return (model, le, symptom_list, metadata, resolved_lang) for the given language.
+    Falls back to English if the requested language model is not loaded.
+    """
+    model_data = request.app.state.models.get(lang)
+    if not model_data:
+        logger.warning(f"Model for '{lang}' not available, falling back to English")
+        lang = "en"
+        model_data = request.app.state.models["en"]
+    return (
+        model_data["model"],
+        model_data["le"],
+        model_data["symptom_list"],
+        model_data["metadata"],
+        lang,
+    )
+
+
+# ─────────────────────────────────────────────────────────────
 # SCHEMAS - REGULAR PREDICTION
 # ─────────────────────────────────────────────────────────────
 class PredictRequest(BaseModel):
@@ -135,9 +187,9 @@ class PredictResponse(BaseModel):
 # SCHEMAS - INTERACTIVE DIAGNOSIS
 # ─────────────────────────────────────────────────────────────
 
-# CHANGED: accepts free-text string instead of a list of symptoms
 class InteractiveStartRequest(BaseModel):
     text: str
+    language: Optional[str] = None  # ← NEW: "en", "hi", "pa", or None for auto-detect
 
     @field_validator("text")
     @classmethod
@@ -148,9 +200,11 @@ class InteractiveStartRequest(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "examples": [{
-                "text": "I have fever, headache and vomiting"
-            }]
+            "examples": [
+                {"text": "I have fever, headache and vomiting"},
+                {"text": "मुझे बुखार और सिरदर्द है", "language": "hi"},
+                {"text": "ਮੈਨੂੰ ਬੁਖਾਰ ਅਤੇ ਸਿਰ ਦਰਦ ਹੈ", "language": "pa"},
+            ]
         }
     }
 
@@ -171,7 +225,6 @@ class InteractiveAnswerRequest(BaseModel):
     }
 
 
-# NEW: schema for adding more free-text symptoms to an active session
 class InteractiveAddTextRequest(BaseModel):
     session_id: str
     text: str
@@ -191,47 +244,6 @@ class InteractiveAddTextRequest(BaseModel):
             }]
         }
     }
-
-
-# ─────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────
-def detect_language(text: str) -> str:
-    """Detect language from text. Returns 'en', 'hi', or 'pa'."""
-    try:
-        lang = detect(text)
-        # Map detected language codes
-        if lang in ['hi', 'mr', 'ne']:  # Hindi, Marathi, Nepali (Devanagari script)
-            return 'hi'
-        elif lang in ['pa']:  # Punjabi
-            return 'pa'
-        else:
-            return 'en'
-    except:
-        return 'en'  # Default to English
-
-
-def confidence_label(score: float) -> str:
-    if score >= 70:
-        return "High"
-    elif score >= 40:
-        return "Moderate"
-    return "Low"
-
-
-def extract_symptoms_from_text(text: str, symptom_list: List[str]) -> List[str]:
-    """
-    Extract symptoms from natural language text.
-    For Hindi/Punjabi, looks for symptom mentions directly.
-    """
-    text_lower = text.lower()
-    found_symptoms = []
-    
-    for symptom in symptom_list:
-        if symptom.lower() in text_lower:
-            found_symptoms.append(symptom)
-    
-    return found_symptoms
 
 
 # ─────────────────────────────────────────────────────────────
@@ -284,19 +296,7 @@ def predict(request: Request, body: PredictRequest):
     else:
         lang = detect_language(body.text)
     
-    # Get model for detected language
-    model_data = request.app.state.models.get(lang)
-    
-    if not model_data:
-        # Fallback to English if requested language model not available
-        logger.warning(f"Model for '{lang}' not available, falling back to English")
-        lang = 'en'
-        model_data = request.app.state.models['en']
-    
-    model = model_data["model"]
-    le = model_data["le"]
-    symptom_list = model_data["symptom_list"]
-    metadata = model_data["metadata"]
+    model, le, symptom_list, metadata, lang = _resolve_model(request, lang)
     
     # Extract symptoms from text
     found_symptoms = extract_symptoms_from_text(body.text, symptom_list)
@@ -318,8 +318,8 @@ def predict(request: Request, body: PredictRequest):
             vector[symptom_list.index(s)] = 1
     
     # Predict
-    vector_df = pd.DataFrame([vector], columns=symptom_list)
-    probs = model.predict_proba(vector_df)[0]
+    
+    probs = model.predict_proba(vector.reshape(1, -1))[0]
     
     # Top 3
     top3_idx = np.argsort(probs)[::-1][:3]
@@ -352,22 +352,29 @@ def predict(request: Request, body: PredictRequest):
 def start_interactive_diagnosis(request: Request, body: InteractiveStartRequest):
     """
     Start an interactive diagnosis session.
-    
-    Accepts free-text describing symptoms. The system extracts recognized symptoms,
-    then asks follow-up questions to narrow down the diagnosis,
-    mimicking how a real doctor conducts a diagnostic interview.
-    
-    Returns:
-        - session_id: Use this in subsequent /answer calls
-        - current_predictions: Top 3 diseases with probabilities
-        - next_question: The first question to ask
-        - status: "questioning" or "complete"
-    """
-    model = request.app.state.model
-    le = request.app.state.le
-    symptom_list = request.app.state.symptom_list
 
-    # CHANGED: extract symptoms from free-text using the shared helper
+    Accepts free-text describing symptoms in English, Hindi, or Punjabi.
+    Pass `language` explicitly ("en"/"hi"/"pa") or let the API auto-detect it.
+
+    The system extracts recognized symptoms, then asks follow-up yes/no questions
+    IN THE SAME LANGUAGE to narrow down the diagnosis.
+
+    Returns:
+        - session_id: Use this in subsequent /answer and /add_text calls
+        - current_predictions: Top 3 diseases with probabilities
+        - next_question: First question (in the detected/specified language)
+        - status: "questioning" or "complete"
+        - language: Resolved language code used for this session
+    """
+    # ── resolve language ──────────────────────────────────────
+    lang = body.language.lower() if body.language else detect_language(body.text)
+    if lang not in ['en', 'hi', 'pa']:
+        lang = 'en'
+
+    # ── pick the right model ──────────────────────────────────
+    model, le, symptom_list, _, lang = _resolve_model(request, lang)
+
+    # ── extract symptoms ──────────────────────────────────────
     recognized = extract_symptoms_from_text(body.text, symptom_list)
 
     if len(recognized) < 1:
@@ -376,35 +383,36 @@ def start_interactive_diagnosis(request: Request, body: InteractiveStartRequest)
             detail={
                 "error": "No recognized symptoms found in your text.",
                 "provided_text": body.text,
-                "hint": "Try describing your symptoms more explicitly, e.g. 'I have fever and headache'."
+                "hint": "Try describing your symptoms more explicitly, e.g. 'I have fever and headache'.",
+                "language_detected": lang
             }
         )
-    
-    # Create session (unchanged)
-    result = create_session(model, le, symptom_list, recognized)
-    
+
+    # ── create session with language ──────────────────────────
+    result = create_session(model, le, symptom_list, recognized, lang=lang)
     return result
 
 
 @app.post("/predict_interactive/answer", tags=["Interactive Diagnosis"])
 def answer_interactive_question(request: Request, body: InteractiveAnswerRequest):
     """
-    Answer a question in an interactive diagnosis session.
-    
+    Answer a yes/no question in an interactive diagnosis session.
+
+    Language is remembered from the session automatically — no need to pass it again.
+    The next question will be returned in the same language as the session.
+
     After answering, the system will either:
     - Ask another question (status="questioning")
     - Provide final diagnosis (status="complete")
-    
-    Returns:
-        - current_predictions: Updated disease probabilities
-        - next_question: Next question (if status="questioning")
-        - final_predictions: Final results (if status="complete")
-        - status: "questioning" or "complete"
     """
-    model = request.app.state.model
-    le = request.app.state.le
-    symptom_list = request.app.state.symptom_list
-    
+    # ── look up session to get language, then resolve matching model ──
+    session = SESSIONS.get(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {body.session_id} not found")
+
+    lang = session.get("lang", "en")
+    model, le, symptom_list, _, _ = _resolve_model(request, lang)
+
     try:
         result = answer_question(
             body.session_id,
@@ -415,29 +423,31 @@ def answer_interactive_question(request: Request, body: InteractiveAnswerRequest
             symptom_list
         )
         return result
-    
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-# NEW: endpoint to add more free-text symptoms to an active session
 @app.post("/predict_interactive/add_text", tags=["Interactive Diagnosis"])
 def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest):
     """
     Add more free-text symptoms to an active diagnosis session.
-    
+
     Extracts any new symptoms from the provided text and merges them into
-    the existing session without resetting it. Probabilities are recalculated.
-    The MCQ question flow is not affected.
-    
+    the existing session without resetting it. Uses the session's original
+    language model. Probabilities are recalculated.
+
     Returns:
         - session_id
         - updated_predictions: Recalculated top 3 diseases
         - new_symptoms_added: Symptoms extracted and added from the new text
     """
-    model = request.app.state.model
-    le = request.app.state.le
-    symptom_list = request.app.state.symptom_list
+    # ── look up session to get language, then resolve matching model ──
+    session = SESSIONS.get(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {body.session_id} not found")
+
+    lang = session.get("lang", "en")
+    model, le, symptom_list, _, _ = _resolve_model(request, lang)
 
     try:
         result = add_text_to_session(
@@ -448,7 +458,6 @@ def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest
             symptom_list
         )
         return result
-
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -457,14 +466,14 @@ def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest
 def interactive_demo_page():
     """
     Serve a simple HTML demo page for interactive diagnosis.
-    
-    Open this in your browser to test the interactive diagnosis feature.
+    Supports English, Hindi, and Punjabi with a language selector.
     """
     html_content = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>Interactive Disease Diagnosis</title>
+    <meta charset="utf-8">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -512,48 +521,65 @@ def interactive_demo_page():
         .btn-no { background: #dc3545; color: white; }
         .btn-start { background: #007bff; color: white; }
         .btn-add { background: #6f42c1; color: white; }
-        input {
+        input, select {
             width: 100%;
             padding: 10px;
             font-size: 16px;
             border: 2px solid #ddd;
             border-radius: 5px;
             box-sizing: border-box;
+            margin-bottom: 10px;
         }
         .complete { background: #d4edda; padding: 20px; border-radius: 5px; margin: 20px 0; }
         .add-text-box { background: #f0e6ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .lang-badge {
+            display: inline-block;
+            background: #17a2b8;
+            color: white;
+            border-radius: 4px;
+            padding: 2px 10px;
+            font-size: 13px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🏥 Interactive Disease Diagnosis</h1>
-        <p>Describe your symptoms in plain text. The system will ask follow-up questions to narrow down your diagnosis.</p>
-        
+        <p>Describe your symptoms in English, Hindi, or Punjabi. Follow-up questions will appear in the same language.</p>
+
         <div id="step1" class="step">
-            <h3>Step 1: Describe your symptoms</h3>
-            <input type="text" id="symptoms" placeholder="e.g., I have fever, headache and feel like vomiting">
-            <br><br>
+            <h3>Step 1: Choose language &amp; describe symptoms</h3>
+            <select id="langSelect">
+                <option value="">Auto-detect language</option>
+                <option value="en">English</option>
+                <option value="hi">हिन्दी (Hindi)</option>
+                <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+            </select>
+            <input type="text" id="symptoms"
+                placeholder="e.g. I have fever, headache and vomiting  /  मुझे बुखार और सिरदर्द है  /  ਮੈਨੂੰ ਬੁਖਾਰ ਅਤੇ ਸਿਰ ਦਰਦ ਹੈ">
             <button class="btn-start" onclick="startDiagnosis()">Start Diagnosis</button>
         </div>
-        
+
         <div id="step2" class="step" style="display:none;">
-            <h3>Current Predictions:</h3>
+            <h3>Current Predictions <span id="langBadge" class="lang-badge"></span></h3>
             <div id="predictions" class="predictions"></div>
 
             <div class="add-text-box">
                 <strong>Add More Symptoms:</strong>
-                <input type="text" id="addTextInput" placeholder="e.g., I also have chills and sweating">
-                <br><br>
+                <input type="text" id="addTextInput"
+                    placeholder="Describe additional symptoms in the same language...">
                 <button class="btn-add" onclick="addMoreSymptoms()">➕ Add Symptoms</button>
             </div>
-            
+
             <div id="questionBox" class="question" style="display:none;">
                 <strong>Question:</strong>
                 <p id="questionText"></p>
                 <button class="btn-yes" onclick="answerQuestion(true)">✓ Yes</button>
                 <button class="btn-no" onclick="answerQuestion(false)">✗ No</button>
             </div>
-            
+
             <div id="complete" class="complete" style="display:none;">
                 <h3>✅ Diagnosis Complete</h3>
                 <p id="stopReason"></p>
@@ -562,34 +588,42 @@ def interactive_demo_page():
             </div>
         </div>
     </div>
-    
+
     <script>
         let sessionId = null;
         let currentSymptom = null;
-        
+
+        const LANG_LABELS = { en: 'English', hi: 'हिन्दी', pa: 'ਪੰਜਾਬੀ' };
+
         async function startDiagnosis() {
             const text = document.getElementById('symptoms').value.trim();
+            const langVal = document.getElementById('langSelect').value;
             if (!text) return;
-            
+
+            const body = { text };
+            if (langVal) body.language = langVal;
+
             const response = await fetch('/predict_interactive/start', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ text })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
             });
-            
+
             const data = await response.json();
             if (!response.ok) { alert(JSON.stringify(data.detail)); return; }
 
             sessionId = data.session_id;
+            const lang = data.language || 'en';
+            document.getElementById('langBadge').textContent = LANG_LABELS[lang] || lang;
             document.getElementById('step1').style.display = 'none';
             document.getElementById('step2').style.display = 'block';
             displayResults(data);
         }
-        
+
         async function answerQuestion(answer) {
             const response = await fetch('/predict_interactive/answer', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, symptom: currentSymptom, answer })
             });
             const data = await response.json();
@@ -602,7 +636,7 @@ def interactive_demo_page():
 
             const response = await fetch('/predict_interactive/add_text', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, text })
             });
             const data = await response.json();
@@ -610,7 +644,6 @@ def interactive_demo_page():
 
             document.getElementById('addTextInput').value = '';
 
-            // Update predictions display with the returned updated_predictions
             const predictions = data.updated_predictions;
             let html = '';
             predictions.forEach(p => {
@@ -618,7 +651,7 @@ def interactive_demo_page():
             });
             document.getElementById('predictions').innerHTML = html;
         }
-        
+
         function displayResults(data) {
             const predictions = data.current_predictions || data.final_predictions;
             let html = '';
@@ -626,7 +659,7 @@ def interactive_demo_page():
                 html += `<div class="disease"><strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence</div>`;
             });
             document.getElementById('predictions').innerHTML = html;
-            
+
             if (data.status === 'questioning' && data.next_question) {
                 document.getElementById('questionText').textContent = data.next_question.question;
                 currentSymptom = data.next_question.symptom;
@@ -643,7 +676,9 @@ def interactive_demo_page():
 </body>
 </html>
     """
- 
+    return HTMLResponse(content=html_content)
+
+
 @app.get("/interactive", response_class=HTMLResponse)
 def interactive_page(request: Request):
     return templates.TemplateResponse("interactive.html", {"request": request})
