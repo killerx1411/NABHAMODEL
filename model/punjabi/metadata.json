@@ -8,9 +8,9 @@
       "test_acc": 0.2427
     },
     "XGBoost": {
-      "cv_mean": 0.4921,
-      "cv_std": 0.0053,
-      "test_acc": 0.4749
+      "cv_mean": 0.4894,
+      "cv_std": 0.0077,
+      "test_acc": 0.4723
     }
   },
   "n_symptoms": 183,

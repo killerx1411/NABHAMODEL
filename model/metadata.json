@@ -1,5 +1,5 @@
 {
-  "best_model": "XGBoost",
+  "best_model": "Gradient Boosting",
   "results": {
     "Random Forest": {
       "cv_mean": 0.2573,
@@ -7,9 +7,9 @@
       "test_acc": 0.2401
     },
     "XGBoost": {
-      "cv_mean": 0.4841,
-      "cv_std": 0.0089,
-      "test_acc": 0.4855
+      "cv_mean": 0.4782,
+      "cv_std": 0.0073,
+      "test_acc": 0.4802
     },
     "Gradient Boosting": {
       "cv_mean": 0.4828,

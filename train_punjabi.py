@@ -182,3 +182,30 @@ with open(f"{MODEL_DIR}/metadata.json", "w", encoding="utf-8") as f:
     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
 print("\n✅ Punjabi model trained and saved to /model/punjabi")
+# ─────────────────────────────────────────────────────────────
+# EXTRA DIAGNOSTICS (ADD THIS)
+# ─────────────────────────────────────────────────────────────
+
+# Get predictions from best model
+y_pred = best_model.predict(X_test)
+
+# Save per-fold CV scores (not just mean/std)
+fold_scores_dict = {}
+for name, model in trained_models.items():
+    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="accuracy")
+    fold_scores_dict[name] = scores.tolist()
+
+# Classification report
+from sklearn.metrics import classification_report
+report = classification_report(
+    y_test,
+    y_pred,
+    target_names=le.classes_,
+    zero_division=0,
+    output_dict=True
+)
+
+# Confusion matrix
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_test, y_pred)
+np.save(f"{MODEL_DIR}/confusion_matrix.npy", cm)

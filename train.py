@@ -226,3 +226,27 @@ y_pred = best_model.predict(X_test)
 print(classification_report(y_test, y_pred, target_names=le.classes_, zero_division=0))
 
 print("\n✅ Training complete. All artifacts saved in /model")
+# Save per-fold CV scores (not just mean/std)
+fold_scores_dict = {}
+for name, model in trained_models.items():
+    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="accuracy")
+    fold_scores_dict[name] = scores.tolist()
+
+# Save classification report as JSON
+from sklearn.metrics import classification_report
+report = classification_report(y_test, y_pred, 
+                                target_names=le.classes_, 
+                                zero_division=0, 
+                                output_dict=True)
+
+# Save confusion matrix
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_test, y_pred)
+np.save(f"{MODEL_DIR}/confusion_matrix.npy", cm)
+
+# Save all of this
+metadata["fold_scores"]   = fold_scores_dict
+metadata["class_report"]  = report
+metadata["train_size"]    = len(X_train)
+metadata["test_size"]     = len(X_test)
+metadata["n_classes_final"] = int(y_encoded.max()) + 1
