@@ -26,14 +26,14 @@ This project includes training scripts, language detection, and a ready API to s
 
 ```text
 .
-├── app/                       
+├── app/                       #API entrypoint
 ├── data/                      # Place your datasets here
 ├── model/                     # Trained models saved here
 ├── train.py                   # Train English model
 ├── train_hindi.py             # Train Hindi model
 ├── train_punjabi.py           # Train Punjabi model
 ├── validate.py                # Validation/testing script
-├── main_multilingual.py       # API entrypoint
+├── 
 ├── requirements.txt
 ├── Dockerfile
 └── MULTILINGUAL_SETUP.md      # Setup guide
