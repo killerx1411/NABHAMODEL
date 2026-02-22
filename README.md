@@ -1,7 +1,3 @@
-# NABHAMODEL
-Here’s a **professional and complete README** you can use for your GitHub repo **[README for NABHAMODEL](https://github.com/killerx1411/NABHAMODEL)** (multilingual disease prediction system):
-
----
 
 # NABHAMODEL
 
