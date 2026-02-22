@@ -35,6 +35,55 @@
         margin-bottom: 30px;
     }
 
+    /* Language selector */
+    .lang-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    .lang-row label {
+        font-size: 14px;
+        opacity: 0.85;
+        align-self: center;
+        white-space: nowrap;
+    }
+
+    select#langSelect {
+        flex: 1;
+        padding: 10px 14px;
+        font-size: 15px;
+        border-radius: 8px;
+        border: none;
+        background: rgba(255,255,255,0.15);
+        color: white;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='white' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        padding-right: 35px;
+    }
+
+    select#langSelect option {
+        background: #203a43;
+        color: white;
+    }
+
+    /* Language badge shown after session starts */
+    .lang-badge {
+        display: inline-block;
+        background: rgba(0, 198, 255, 0.25);
+        border: 1px solid rgba(0, 198, 255, 0.5);
+        color: #00c6ff;
+        border-radius: 20px;
+        padding: 3px 12px;
+        font-size: 13px;
+        margin-left: 10px;
+        vertical-align: middle;
+    }
+
     input[type="text"] {
         width: 100%;
         padding: 14px;
@@ -87,6 +136,18 @@
         border-radius: 10px;
     }
 
+    .predictions-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .predictions-header h3 {
+        margin: 0;
+        font-size: 15px;
+        opacity: 0.85;
+    }
+
     .prediction-item {
         padding: 10px;
         margin-bottom: 8px;
@@ -102,7 +163,7 @@
         font-size: 18px;
     }
 
-    /* Add More Symptoms panel — always visible once session starts */
+    /* Add More Symptoms panel */
     .add-text-panel {
         margin-top: 25px;
         padding: 20px;
@@ -168,11 +229,23 @@
     <h1>AI Interactive Diagnosis</h1>
     <p class="subtitle">Describe your symptoms in plain text — the system will ask follow-up questions like a real doctor.</p>
 
-    <!-- Step 1: free-text entry -->
+    <!-- Step 1: language + free-text entry -->
     <div id="step1">
+
+        <!-- Language selector -->
+        <div class="lang-row">
+            <label>Language:</label>
+            <select id="langSelect">
+                <option value="">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="hi">हिन्दी (Hindi)</option>
+                <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+            </select>
+        </div>
+
         <label>Describe your symptoms:</label>
         <input type="text" id="symptomsInput"
-               placeholder="e.g. I have fever, headache and I feel like vomiting">
+               placeholder="e.g. I have fever, headache and I feel like vomiting  /  मुझे बुखार और सिरदर्द है  /  ਮੈਨੂੰ ਬੁਖਾਰ ਹੈ">
         <button class="primary" onclick="startDiagnosis()">Start Diagnosis</button>
     </div>
 
@@ -184,9 +257,15 @@
     <div id="results" style="display:none;">
 
         <!-- Live predictions -->
-        <div class="predictions" id="predictionsBox"></div>
+        <div class="predictions" id="predictionsBox">
+            <div class="predictions-header">
+                <h3>Current Predictions</h3>
+                <span class="lang-badge" id="langBadge"></span>
+            </div>
+            <div id="predictionsList"></div>
+        </div>
 
-        <!-- Add More Symptoms panel (always shown while session is active) -->
+        <!-- Add More Symptoms panel -->
         <div class="add-text-panel" id="addTextPanel">
             <h4>➕ Add More Symptoms</h4>
             <div class="row">
@@ -223,9 +302,17 @@
 let sessionId = null;
 let currentSymptom = null;
 
-// ── Start session with free-text ──────────────────────────────
+const LANG_LABELS = {
+    en: "English",
+    hi: "हिन्दी",
+    pa: "ਪੰਜਾਬੀ"
+};
+
+// ── Start session ─────────────────────────────────────────────
 async function startDiagnosis() {
     const text = document.getElementById("symptomsInput").value.trim();
+    const lang = document.getElementById("langSelect").value;
+
     if (!text) {
         showError("Please describe your symptoms first.");
         return;
@@ -235,11 +322,13 @@ async function startDiagnosis() {
     clearError();
 
     try {
+        const body = { text };
+        if (lang) body.language = lang;   // only send if explicitly chosen
+
         const response = await fetch("/predict_interactive/start", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            // CHANGED: send { text } instead of { symptoms }
-            body: JSON.stringify({ text })
+            body: JSON.stringify(body)
         });
 
         const data = await response.json();
@@ -249,6 +338,22 @@ async function startDiagnosis() {
         }
 
         sessionId = data.session_id;
+
+        // Show language badge
+        const resolvedLang = data.language || "en";
+        const badge = document.getElementById("langBadge");
+        badge.textContent = LANG_LABELS[resolvedLang] || resolvedLang;
+
+        // Update add-more placeholder to match language
+        const addInput = document.getElementById("addTextInput");
+        if (resolvedLang === "hi") {
+            addInput.placeholder = "जैसे: मुझे ठंड और पसीना भी आ रहा है";
+        } else if (resolvedLang === "pa") {
+            addInput.placeholder = "ਜਿਵੇਂ: ਮੈਨੂੰ ਕੰਬਣੀ ਅਤੇ ਪਸੀਨਾ ਵੀ ਆ ਰਿਹਾ ਹੈ";
+        } else {
+            addInput.placeholder = "e.g. I also have chills and sweating";
+        }
+
         document.getElementById("step1").style.display = "none";
         document.getElementById("results").style.display = "block";
 
@@ -261,7 +366,7 @@ async function startDiagnosis() {
     toggleLoading(false);
 }
 
-// ── Yes / No MCQ answer (unchanged flow) ─────────────────────
+// ── Yes / No MCQ answer ───────────────────────────────────────
 async function submitAnswer(answer) {
     toggleLoading(true);
     clearError();
@@ -292,7 +397,7 @@ async function submitAnswer(answer) {
     toggleLoading(false);
 }
 
-// ── Add more free-text symptoms during active session ─────────
+// ── Add more free-text symptoms ───────────────────────────────
 async function addMoreSymptoms() {
     const text = document.getElementById("addTextInput").value.trim();
     if (!text) return;
@@ -313,13 +418,9 @@ async function addMoreSymptoms() {
             throw new Error(JSON.stringify(data.detail));
         }
 
-        // Clear input
         document.getElementById("addTextInput").value = "";
-
-        // Update predictions in-place (no page reload)
         renderPredictions(data.updated_predictions);
 
-        // Show feedback about what was added
         if (data.new_symptoms_added && data.new_symptoms_added.length > 0) {
             noticeEl.textContent = "Added: " + data.new_symptoms_added.join(", ");
         } else {
@@ -343,7 +444,7 @@ function renderPredictions(predictions) {
             </div>
         `;
     });
-    document.getElementById("predictionsBox").innerHTML = html;
+    document.getElementById("predictionsList").innerHTML = html;
 }
 
 function renderResponse(data) {
@@ -355,15 +456,12 @@ function renderResponse(data) {
         document.getElementById("completeBox").style.display = "none";
         document.getElementById("questionText").innerText = data.next_question.question;
         currentSymptom = data.next_question.symptom;
-
     } else {
         document.getElementById("questionBox").style.display = "none";
         document.getElementById("completeBox").style.display = "block";
         document.getElementById("stopReason").innerText = data.stop_reason || "Diagnosis finished.";
         document.getElementById("questionsAsked").innerText =
             "Questions asked: " + (data.questions_asked || 0);
-
-        // Hide the add-text panel once diagnosis is complete
         document.getElementById("addTextPanel").style.display = "none";
     }
 }
