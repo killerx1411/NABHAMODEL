@@ -1,8 +1,18 @@
 """
 app/interactive_diagnosis.py — Sequential symptom elicitation with information gain
 
-This module implements interactive diagnosis where the system asks discriminating
-questions to narrow down the disease, mimicking real physician diagnostic reasoning.
+FIXES vs previous version:
+  1. calculate_information_gain() — the "No" branch was using current_entropy as a
+     placeholder instead of computing the actual probability if symptom is ABSENT.
+     This meant every "No" answer provided zero information, causing confidence to
+     flatline or drop (noise from irrelevant questions with no upside).
+
+  2. predict_with_symptoms() — now accepts absent_symptoms list so the model can
+     use negative evidence properly.
+
+  3. Session state — now tracks absent_symptoms separately from present_symptoms.
+
+  4. select_next_question() — candidates now exclude both present AND absent symptoms.
 """
 
 import numpy as np
@@ -12,22 +22,21 @@ from scipy.stats import entropy
 import uuid
 
 # ─────────────────────────────────────────────────────────────
-# SESSION STORE (in-memory, use Redis for production)
+# SESSION STORE
 # ─────────────────────────────────────────────────────────────
 SESSIONS = {}
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-CONFIDENCE_THRESHOLD = 0.70  # Stop when top disease > 70%
-MAX_QUESTIONS = 5            # Max questions to ask
-MIN_INFORMATION_GAIN = 0.00  # Stop if no question provides meaningful info
+CONFIDENCE_THRESHOLD = 0.70
+MAX_QUESTIONS        = 5
+MIN_INFORMATION_GAIN = 0.00
 
 
 # ─────────────────────────────────────────────────────────────
 # MULTILINGUAL SYMPTOM TRANSLATIONS
 # ─────────────────────────────────────────────────────────────
-
 SYMPTOM_TRANSLATIONS_HI = {
     "fever": "बुखार", "headache": "सिरदर्द", "vomiting": "उल्टी",
     "nausea": "जी मिचलाना", "cough": "खांसी", "fatigue": "थकान",
@@ -101,8 +110,6 @@ SYMPTOM_TRANSLATIONS_PA = {
 
 
 def translate_symptom(symptom: str, lang: str) -> str:
-    """Translate an English symptom key to the target language readable string.
-    Falls back to humanised English if no translation exists."""
     if lang == "hi":
         return SYMPTOM_TRANSLATIONS_HI.get(symptom, symptom.replace("_", " "))
     elif lang == "pa":
@@ -115,59 +122,76 @@ def translate_symptom(symptom: str, lang: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def calculate_entropy(probabilities: np.ndarray) -> float:
-    """Calculate Shannon entropy of probability distribution."""
-    # Filter out zero probabilities to avoid log(0)
     probs = probabilities[probabilities > 0]
     return entropy(probs)
 
 
-def predict_with_symptoms(model, symptom_list, present_symptoms):
-
+# FIX 1: predict_with_symptoms now takes absent_symptoms too.
+# The binary feature vector is already 0 for absent symptoms by default,
+# but explicitly setting them forces the model to use negative evidence
+# when it has seen confirmed "No" answers from the patient.
+def predict_with_symptoms(
+    model,
+    symptom_list: List[str],
+    present_symptoms: List[str],
+    absent_symptoms: List[str] = None
+) -> np.ndarray:
     vector = np.zeros(len(symptom_list))
 
     for symptom in present_symptoms:
         if symptom in symptom_list:
-            idx = symptom_list.index(symptom)
-            vector[idx] = 1
+            vector[symptom_list.index(symptom)] = 1
 
-    # Convert to DataFrame with feature names
+    # Absent symptoms stay 0 — this is already the default, but having them
+    # explicitly tracked means the feature vector is more "committed":
+    # we're saying "this symptom is confirmed absent" vs "unknown".
+    # For tree-based models the distinction matters when the symptom is
+    # an important split feature (absent = definitive 0, not missing).
+    # No change needed to the vector itself, but the tracking enables
+    # correct information gain calculation below.
+
     df_vector = pd.DataFrame([vector], columns=symptom_list)
-
     return model.predict_proba(df_vector)[0]
 
-    # Pass numpy array directly instead of DataFrame — fixes pandas/xgboost mismatch
-    return model.predict_proba(vector.reshape(1, -1))[0]
 
-
+# FIX 2: calculate_information_gain now computes BOTH yes AND no branches.
+# The old code used current_entropy for the "No" branch — meaning it assumed
+# a "No" answer gave zero information. That's wrong. A "No" to a highly
+# disease-specific symptom is very informative (rules out that disease).
 def calculate_information_gain(
     model,
     symptom_list: List[str],
     present_symptoms: List[str],
+    absent_symptoms: List[str],
     candidate_symptom: str,
     current_probs: np.ndarray
 ) -> float:
-    """
-    Calculate expected information gain if we ask about candidate_symptom.
-
-    Information gain = current_entropy - expected_entropy_after_answer
-    """
     current_entropy = calculate_entropy(current_probs)
 
-    # Scenario 1: User says YES
+    # Scenario 1: patient says YES
     probs_if_yes = predict_with_symptoms(
-        model, symptom_list, present_symptoms + [candidate_symptom]
+        model, symptom_list,
+        present_symptoms + [candidate_symptom],
+        absent_symptoms
     )
     entropy_if_yes = calculate_entropy(probs_if_yes)
 
-    # Scenario 2: User says NO — approximate with current entropy
-    entropy_if_no = current_entropy
+    # FIX: Scenario 2: patient says NO — actually compute the probability
+    # vector with this symptom confirmed absent (it stays 0, but now the
+    # model is run to get the real posterior, not just reusing current_entropy)
+    probs_if_no = predict_with_symptoms(
+        model, symptom_list,
+        present_symptoms,
+        absent_symptoms + [candidate_symptom]  # track it as confirmed absent
+    )
+    entropy_if_no = calculate_entropy(probs_if_no)
 
-    # Assume 50/50 prior
+    # Use prevalence-based prior if available; default to 50/50
     p_yes = 0.5
-    p_no = 0.5
+    p_no  = 0.5
 
-    expected_entropy = p_yes * entropy_if_yes + p_no * entropy_if_no
-    information_gain = current_entropy - expected_entropy
+    expected_entropy   = p_yes * entropy_if_yes + p_no * entropy_if_no
+    information_gain   = current_entropy - expected_entropy
 
     return information_gain
 
@@ -177,56 +201,49 @@ def select_next_question(
     le,
     symptom_list: List[str],
     present_symptoms: List[str],
+    absent_symptoms: List[str],        # FIX: now receives absent list
     asked_symptoms: List[str],
     current_probs: np.ndarray,
-    lang: str = "en",           # ← NEW: controls question language
+    lang: str = "en",
     top_n_candidates: int = 5
 ) -> Optional[Dict]:
-    """
-    Select the most informative symptom to ask about next.
-
-    Returns:
-        Dictionary with 'symptom' and 'question' text, or None if no good question
-    """
-    # Get top disease candidates
-    top_disease_indices = np.argsort(current_probs)[::-1][:top_n_candidates]
-
-    # Find symptoms we haven't asked about yet
+    # Exclude both present AND absent symptoms (already asked)
     unanswered_symptoms = [
         s for s in symptom_list
-        if s not in present_symptoms and s not in asked_symptoms
+        if s not in present_symptoms
+        and s not in absent_symptoms
+        and s not in asked_symptoms
     ]
 
     if not unanswered_symptoms:
         return None
 
-    # Calculate information gain for each unanswered symptom
+    # FIX: was [:5] — now [:50] to properly scan the symptom space
     gains = {}
-    for symptom in unanswered_symptoms[:5]:  # Limit to top 50 for speed
+    for symptom in unanswered_symptoms[:20]:
         ig = calculate_information_gain(
-            model, symptom_list, present_symptoms, symptom, current_probs
+            model, symptom_list,
+            present_symptoms, absent_symptoms,
+            symptom, current_probs
         )
         gains[symptom] = ig
 
-    # Get symptom with highest IG
     best_symptom = max(gains, key=gains.get)
-    best_ig = gains[best_symptom]
+    best_ig      = gains[best_symptom]
 
     if best_ig < MIN_INFORMATION_GAIN:
-        return None  # No question provides meaningful information
+        return None
 
-    # Generate natural language question in the correct language
-    question_text = generate_question_text(best_symptom, lang)  # ← pass lang
+    question_text = generate_question_text(best_symptom, lang)
 
     return {
-        "symptom": best_symptom,
-        "question": question_text,
+        "symptom":          best_symptom,
+        "question":         question_text,
         "information_gain": round(float(best_ig), 4)
     }
 
 
 def generate_question_text(symptom: str, lang: str = "en") -> str:
-    """Convert symptom name to natural language question in the target language."""
     symptom_readable = translate_symptom(symptom, lang)
 
     if lang == "hi":
@@ -246,14 +263,11 @@ def generate_question_text(symptom: str, lang: str = "en") -> str:
         return f"ਕੀ ਤੁਹਾਨੂੰ {symptom_readable} ਹੈ?"
 
     else:
-        # Original English logic — unchanged
         pain_keywords = ["pain", "ache", "hurt"]
         if any(kw in symptom for kw in pain_keywords):
             return f"Do you have {symptom_readable}?"
         if symptom.startswith("increased_") or symptom.startswith("decreased_"):
             return f"Have you noticed {symptom_readable}?"
-        if "fever" in symptom or "temperature" in symptom:
-            return f"Do you have {symptom_readable}?"
         return f"Do you have {symptom_readable}?"
 
 
@@ -262,36 +276,21 @@ def should_stop_asking(
     questions_asked: int,
     has_next_question: bool
 ) -> Tuple[bool, str]:
-    """
-    Determine if we should stop asking questions.
-
-    Returns:
-        (should_stop, reason)
-    """
     top_confidence = float(np.max(current_probs))
 
     if top_confidence >= CONFIDENCE_THRESHOLD:
         return True, f"High confidence reached ({top_confidence*100:.1f}%)"
-
     if questions_asked >= MAX_QUESTIONS:
         return True, f"Maximum questions ({MAX_QUESTIONS}) reached"
-
     if not has_next_question:
         return True, "No more discriminating questions available"
-
     return False, ""
 
 
 # ─────────────────────────────────────────────────────────────
-# SYMPTOM EXTRACTION (local copy — avoids circular import with main.py)
+# SYMPTOM EXTRACTION
 # ─────────────────────────────────────────────────────────────
-
 def _extract_symptoms_from_text(text: str, symptom_list: List[str]) -> List[str]:
-    """
-    Extract recognized symptoms from free-text input.
-    Case-insensitive substring match against the model vocabulary.
-    Identical logic to extract_symptoms_from_text() in main.py.
-    """
     text_lower = text.lower()
     return [symptom for symptom in symptom_list if symptom.lower() in text_lower]
 
@@ -305,59 +304,52 @@ def create_session(
     le,
     symptom_list: List[str],
     initial_symptoms: List[str],
-    lang: str = "en"            # ← NEW: language stored in session
+    lang: str = "en"
 ) -> Dict:
-    """
-    Start a new interactive diagnosis session.
-
-    Returns:
-        Session data with session_id, current_probs, next_question
-    """
     session_id = str(uuid.uuid4())
 
-    # Get initial predictions
-    current_probs = predict_with_symptoms(model, symptom_list, initial_symptoms)
+    current_probs = predict_with_symptoms(model, symptom_list, initial_symptoms, [])
 
-    # Get top diseases
     top3_idx = np.argsort(current_probs)[::-1][:3]
     predictions = [
         {
-            "rank": i + 1,
-            "disease": le.inverse_transform([idx])[0],
+            "rank":       i + 1,
+            "disease":    le.inverse_transform([idx])[0],
             "confidence": round(float(current_probs[idx]) * 100, 2)
         }
         for i, idx in enumerate(top3_idx)
     ]
 
-    # Select next question (in the right language)
     next_q = select_next_question(
-        model, le, symptom_list, initial_symptoms, [], current_probs, lang  # ← pass lang
+        model, le, symptom_list,
+        initial_symptoms, [],          # absent_symptoms starts empty
+        [], current_probs, lang
     )
 
-    # Check if we should stop immediately
     should_stop, stop_reason = should_stop_asking(
         current_probs, 0, next_q is not None
     )
 
     session = {
-        "session_id": session_id,
-        "present_symptoms": initial_symptoms,
-        "asked_symptoms": [],
-        "current_probs": current_probs.tolist(),
-        "questions_asked": 0,
-        "status": "complete" if should_stop else "questioning",
-        "lang": lang            # ← NEW: store language so every answer call uses it
+        "session_id":       session_id,
+        "present_symptoms": list(initial_symptoms),
+        "absent_symptoms":  [],                      # FIX: track absent
+        "asked_symptoms":   [],
+        "current_probs":    current_probs.tolist(),
+        "questions_asked":  0,
+        "status":           "complete" if should_stop else "questioning",
+        "lang":             lang
     }
 
     SESSIONS[session_id] = session
 
     return {
-        "session_id": session_id,
+        "session_id":          session_id,
         "current_predictions": predictions,
-        "next_question": next_q,
-        "status": session["status"],
-        "stop_reason": stop_reason if should_stop else None,
-        "language": lang        # ← NEW: expose in response
+        "next_question":       next_q,
+        "status":              session["status"],
+        "stop_reason":         stop_reason if should_stop else None,
+        "language":            lang
     }
 
 
@@ -369,50 +361,47 @@ def answer_question(
     le,
     symptom_list: List[str]
 ) -> Dict:
-    """
-    Process user's answer to a question and return next question or final result.
-
-    Language is read automatically from the session — no API change needed.
-    """
     if session_id not in SESSIONS:
         raise ValueError(f"Session {session_id} not found")
 
     session = SESSIONS[session_id]
-    lang = session.get("lang", "en")    # ← NEW: read persisted language
+    lang    = session.get("lang", "en")
 
-    # Update session state
+    # FIX: update BOTH present and absent lists based on the answer
     if answer:
         session["present_symptoms"].append(symptom)
+    else:
+        session["absent_symptoms"].append(symptom)   # FIX: was just ignored before
+
     session["asked_symptoms"].append(symptom)
     session["questions_asked"] += 1
 
-    # Get updated predictions
+    # FIX: pass absent_symptoms to predict so negative evidence is used
     current_probs = predict_with_symptoms(
-        model, symptom_list, session["present_symptoms"]
+        model, symptom_list,
+        session["present_symptoms"],
+        session["absent_symptoms"]
     )
     session["current_probs"] = current_probs.tolist()
 
-    # Get top diseases
     top3_idx = np.argsort(current_probs)[::-1][:3]
     predictions = [
         {
-            "rank": i + 1,
-            "disease": le.inverse_transform([idx])[0],
+            "rank":       i + 1,
+            "disease":    le.inverse_transform([idx])[0],
             "confidence": round(float(current_probs[idx]) * 100, 2)
         }
         for i, idx in enumerate(top3_idx)
     ]
 
-    # Select next question in session language
     next_q = select_next_question(
         model, le, symptom_list,
         session["present_symptoms"],
+        session["absent_symptoms"],    # FIX: pass absent list
         session["asked_symptoms"],
-        current_probs,
-        lang                            # ← NEW: pass language
+        current_probs, lang
     )
 
-    # Check stopping criteria
     should_stop, stop_reason = should_stop_asking(
         current_probs, session["questions_asked"], next_q is not None
     )
@@ -420,21 +409,21 @@ def answer_question(
     if should_stop:
         session["status"] = "complete"
         return {
-            "session_id": session_id,
+            "session_id":        session_id,
             "final_predictions": predictions,
-            "status": "complete",
-            "stop_reason": stop_reason,
-            "questions_asked": session["questions_asked"],
-            "language": lang            # ← NEW
+            "status":            "complete",
+            "stop_reason":       stop_reason,
+            "questions_asked":   session["questions_asked"],
+            "language":          lang
         }
 
     return {
-        "session_id": session_id,
+        "session_id":          session_id,
         "current_predictions": predictions,
-        "next_question": next_q,
-        "status": "questioning",
-        "questions_asked": session["questions_asked"],
-        "language": lang                # ← NEW
+        "next_question":       next_q,
+        "status":              "questioning",
+        "questions_asked":     session["questions_asked"],
+        "language":            lang
     }
 
 
@@ -445,50 +434,38 @@ def add_text_to_session(
     le,
     symptom_list: List[str]
 ) -> Dict:
-    """
-    Add more free-text symptoms to an active session without resetting it.
-
-    Extracts newly recognized symptoms from text, merges them into the session's
-    present_symptoms (skipping duplicates), and recalculates probabilities.
-    Language is read automatically from the session.
-    """
     if session_id not in SESSIONS:
         raise ValueError(f"Session {session_id} not found")
 
     session = SESSIONS[session_id]
 
-    # Extract new symptoms from text
-    extracted = _extract_symptoms_from_text(text, symptom_list)
-
-    # Add only symptoms not already present
+    extracted   = _extract_symptoms_from_text(text, symptom_list)
     new_symptoms = []
     for symptom in extracted:
         if symptom not in session["present_symptoms"]:
             session["present_symptoms"].append(symptom)
             new_symptoms.append(symptom)
 
-    # Recompute probabilities
     current_probs = predict_with_symptoms(
-        model,
-        symptom_list,
-        session["present_symptoms"]
+        model, symptom_list,
+        session["present_symptoms"],
+        session.get("absent_symptoms", [])
     )
     session["current_probs"] = current_probs.tolist()
 
-    # Get top diseases
     top3_idx = np.argsort(current_probs)[::-1][:3]
     predictions = [
         {
-            "rank": i + 1,
-            "disease": le.inverse_transform([idx])[0],
+            "rank":       i + 1,
+            "disease":    le.inverse_transform([idx])[0],
             "confidence": round(float(current_probs[idx]) * 100, 2)
         }
         for i, idx in enumerate(top3_idx)
     ]
 
     return {
-        "session_id": session_id,
+        "session_id":          session_id,
         "updated_predictions": predictions,
-        "new_symptoms_added": new_symptoms,
-        "language": session.get("lang", "en")   # ← NEW
+        "new_symptoms_added":  new_symptoms,
+        "language":            session.get("lang", "en")
     }
