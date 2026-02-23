@@ -1,0 +1,89 @@
+{
+  "language": "Hindi",
+  "best_model": "XGBoost",
+  "results": {
+    "Random Forest": {
+      "cv_mean": 0.9524,
+      "cv_std": 0.0113,
+      "test_acc": 0.9542,
+      "fold_scores": [
+        0.9570200573065902,
+        0.9684813753581661,
+        0.9541547277936963,
+        0.9484240687679083,
+        0.9340974212034384
+      ]
+    },
+    "XGBoost": {
+      "cv_mean": 0.9547,
+      "cv_std": 0.0127,
+      "test_acc": 0.9634,
+      "fold_scores": [
+        0.9541547277936963,
+        0.9684813753581661,
+        0.9627507163323782,
+        0.9570200573065902,
+        0.9312320916905444
+      ]
+    },
+    "Gradient Boosting": {
+      "cv_mean": 0.9358,
+      "cv_std": 0.0126,
+      "test_acc": 0.9359,
+      "fold_scores": [
+        0.9426934097421203,
+        0.9426934097421203,
+        0.9512893982808023,
+        0.9255014326647565,
+        0.9169054441260746
+      ]
+    }
+  },
+  "n_symptoms": 314,
+  "n_diseases": 4,
+  "train_size": 1745,
+  "test_size": 437,
+  "data_source": "Hindi dataset — 4 merged classes, all rows used",
+  "class_report": {
+    "Avascular Necrosis": {
+      "precision": 0.9802371541501976,
+      "recall": 0.9841269841269841,
+      "f1-score": 0.9821782178217822,
+      "support": 252.0
+    },
+    "Hip & Bone Fracture": {
+      "precision": 0.9807692307692307,
+      "recall": 1.0,
+      "f1-score": 0.9902912621359223,
+      "support": 51.0
+    },
+    "Osteoarthritis": {
+      "precision": 0.958904109589041,
+      "recall": 0.958904109589041,
+      "f1-score": 0.958904109589041,
+      "support": 73.0
+    },
+    "Other Orthopaedic": {
+      "precision": 0.8813559322033898,
+      "recall": 0.8524590163934426,
+      "f1-score": 0.8666666666666667,
+      "support": 61.0
+    },
+    "accuracy": 0.9633867276887872,
+    "macro avg": {
+      "precision": 0.9503166066779648,
+      "recall": 0.948872527527367,
+      "f1-score": 0.949510064053353,
+      "support": 437.0
+    },
+    "weighted avg": {
+      "precision": 0.9629329644839528,
+      "recall": 0.9633867276887872,
+      "f1-score": 0.9631131165370431,
+      "support": 437.0
+    }
+  },
+  "cv_mean": 0.9547,
+  "cv_std": 0.0127,
+  "test_accuracy": 0.9634
+}
