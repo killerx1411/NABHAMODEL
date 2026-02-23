@@ -1,23 +1,88 @@
 {
-  "best_model": "Gradient Boosting",
+  "best_model": "Random Forest",
   "results": {
     "Random Forest": {
-      "cv_mean": 0.2573,
-      "cv_std": 0.019,
-      "test_acc": 0.2401
-    },
-    "XGBoost": {
-      "cv_mean": 0.4782,
-      "cv_std": 0.0073,
-      "test_acc": 0.4802
+      "cv_mean": 0.9799,
+      "cv_std": 0.0018,
+      "test_acc": 0.9748,
+      "fold_scores": [
+        0.9770773638968482,
+        0.9799426934097422,
+        0.9828080229226361,
+        0.9799426934097422,
+        0.9799426934097422
+      ]
     },
     "Gradient Boosting": {
-      "cv_mean": 0.4828,
-      "cv_std": 0.0135,
-      "test_acc": 0.4644
+      "cv_mean": 0.9799,
+      "cv_std": 0.0018,
+      "test_acc": 0.9725,
+      "fold_scores": [
+        0.9799426934097422,
+        0.9770773638968482,
+        0.9828080229226361,
+        0.9799426934097422,
+        0.9799426934097422
+      ]
+    },
+    "XGBoost": {
+      "cv_mean": 0.9794,
+      "cv_std": 0.0021,
+      "test_acc": 0.9748,
+      "fold_scores": [
+        0.9770773638968482,
+        0.9770773638968482,
+        0.9828080229226361,
+        0.9799426934097422,
+        0.9799426934097422
+      ]
     }
   },
   "n_symptoms": 159,
-  "n_diseases": 220,
-  "data_source": "BERT-enhanced medical dataset"
+  "n_diseases": 4,
+  "train_size": 1745,
+  "test_size": 437,
+  "data_source": "BERT dataset — 4 merged classes, all 2182 rows used",
+  "class_report": {
+    "Avascular Necrosis": {
+      "precision": 0.9879032258064516,
+      "recall": 0.9683794466403162,
+      "f1-score": 0.9780439121756487,
+      "support": 253.0
+    },
+    "Hip & Bone Fracture": {
+      "precision": 1.0,
+      "recall": 0.96875,
+      "f1-score": 0.9841269841269841,
+      "support": 64.0
+    },
+    "Osteoarthritis": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 81.0
+    },
+    "Other Orthopaedic": {
+      "precision": 0.8260869565217391,
+      "recall": 0.9743589743589743,
+      "f1-score": 0.8941176470588236,
+      "support": 39.0
+    },
+    "accuracy": 0.9748283752860412,
+    "macro avg": {
+      "precision": 0.9534975455820477,
+      "recall": 0.9778721052498227,
+      "f1-score": 0.964072135840364,
+      "support": 437.0
+    },
+    "weighted avg": {
+      "precision": 0.9774757607171168,
+      "recall": 0.9748283752860412,
+      "f1-score": 0.9755144736838907,
+      "support": 437.0
+    }
+  },
+  "cv_mean": 0.9799,
+  "cv_std": 0.0018,
+  "test_accuracy": 0.9748
 }

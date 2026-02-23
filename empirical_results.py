@@ -181,12 +181,28 @@ def load_all():
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  DERIVED / SIMULATED DATA
 # ══════════════════════════════════════════════════════════════════════════════
+
+# CHANGE 1: Updated derive_base() to use FINAL interactive accuracy
 def derive_base(meta, diseases, fold_scores):
     res    = meta["results"]
     models = list(res.keys())
     cv_m   = [res[m]["cv_mean"]*100 for m in models]
     cv_s   = [res[m]["cv_std"] *100 for m in models]
-    t_acc  = [res[m]["test_acc"]*100 for m in models]
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Use FINAL interactive accuracy (after questioning)
+    # Falls back to test_acc if final_interactive_acc not in metadata.json
+    # ═══════════════════════════════════════════════════════════════════
+    t_acc  = [res[m].get("final_interactive_acc", res[m]["test_acc"])*100 for m in models]
+
+    # Check if using final values and notify user
+    using_final = any("final_interactive_acc" in res[m] for m in models)
+    if using_final:
+        print(f"   📊 Using FINAL interactive accuracy (after questioning)")
+    else:
+        print(f"   ⚠️  No final_interactive_acc found in metadata.json")
+        print(f"       Run: python add_interactive_accuracy.py to add it")
+
     best   = meta["best_model"]
     rand   = 100/meta["n_diseases"]
 
@@ -223,10 +239,12 @@ def derive_base(meta, diseases, fold_scores):
     return models, cv_m, cv_s, t_acc, best, rand, cats, folds
 
 
+# CHANGE 2: Updated simulate_topk() to use final interactive accuracy
 def simulate_topk(meta):
     res = meta["results"]; out = {}
     for m, r in res.items():
-        t1 = r["test_acc"]*100
+        # Use final interactive accuracy if available
+        t1 = r.get("final_interactive_acc", r["test_acc"])*100
         out[m] = {1:  round(t1, 2),
                   3:  round(min(100, t1+(100-t1)*0.32), 2),
                   5:  round(min(100, t1+(100-t1)*0.45), 2),
@@ -246,16 +264,23 @@ def simulate_active_learning(n=10):
     return qs, curve(48.55,91.0,0.38), curve(46.44,87.0,0.35), curve(24.01,68.0,0.30)
 
 
+# CHANGE 3: Updated build_lang_results() to use final interactive accuracy
 def build_lang_results(lang_meta):
-    en_acc = (lambda m, b: m["results"][b]["test_acc"]*100)(
+    # Use final interactive accuracy for English baseline
+    en_acc = (lambda m, b: m["results"][b].get("final_interactive_acc",
+                                                m["results"][b]["test_acc"])*100)(
         lang_meta["English"], lang_meta["English"]["best_model"])
     out = {}
     for lang in ["English","Hindi","Punjabi"]:
         if lang in lang_meta:
             m = lang_meta[lang]; b = m["best_model"]
-            out[lang] = {"test_acc": m["results"][b]["test_acc"]*100,
-                         "cv_mean":  m["results"][b]["cv_mean"] *100,
-                         "real": True}
+            # Use final interactive accuracy if available
+            out[lang] = {
+                "test_acc": m["results"][b].get("final_interactive_acc",
+                                                 m["results"][b]["test_acc"])*100,
+                "cv_mean":  m["results"][b]["cv_mean"] *100,
+                "real": True
+            }
         else:
             drop = {"Hindi":5.2,"Punjabi":8.1}[lang]
             out[lang] = {"test_acc": round(en_acc-drop, 2),
@@ -290,7 +315,7 @@ def ch_model_bar(ax, models, values, colors, ylabel, title, rand=None, hi=None):
 def ch_grouped_bar(ax, models, cv_m, t_acc, title):
     x = np.arange(len(models)); w = 0.35
     b1 = ax.bar(x-w/2, cv_m,  w, color=PURPLE+"88", edgecolor=PURPLE, lw=1.8, label="CV Mean",       zorder=3)
-    b2 = ax.bar(x+w/2, t_acc, w, color=CYAN  +"88", edgecolor=CYAN,   lw=1.8, label="Test Accuracy",  zorder=3)
+    b2 = ax.bar(x+w/2, t_acc, w, color=CYAN  +"88", edgecolor=CYAN,   lw=1.8, label="Final Accuracy", zorder=3)
     for brs, vals, col in [(b1,cv_m,PURPLE),(b2,t_acc,CYAN)]:
         for bar, v in zip(brs, vals):
             ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.4,
@@ -727,9 +752,11 @@ def build_all_figures(meta, diseases, symptoms, le,
     ROWS = [
         # ── SECTION A ──────────────────────────────────────────────────────
         ("div","A","SECTION A  —  MODEL COMPARISON  ·  3-model ensemble: Random Forest · XGBoost · Gradient Boosting"),
+
+        # CHANGE 4a: Updated A1 chart title to reflect final interactive accuracy
         ("chart", ch_model_bar,
          dict(models=models, values=t_acc, colors=colors, ylabel="Accuracy (%)",
-              title="A1  Test Set Accuracy  —  Out-of-sample performance per model",
+              title="A1  Final Accuracy (After Interactive Diagnosis)  —  Post-questioning performance",
               rand=rand, hi=best)),
         ("chart", ch_model_bar,
          dict(models=models, values=cv_m, colors=colors, ylabel="Accuracy (%)",
@@ -738,9 +765,11 @@ def build_all_figures(meta, diseases, symptoms, le,
         ("chart", ch_cv_errbar,
          dict(models=models, cv_m=cv_m, cv_s=cv_s, colors=colors,
               title="A3  CV Accuracy with ±Std Error Bars  —  Fold-to-fold stability")),
+
+        # CHANGE 4b: Updated A4 chart title to reflect final interactive accuracy
         ("chart", ch_grouped_bar,
          dict(models=models, cv_m=cv_m, t_acc=t_acc,
-              title="A4  CV Mean vs Test Accuracy Side-by-Side  —  In-sample vs out-of-sample")),
+              title="A4  CV Mean vs Final Interactive Accuracy  —  In-sample vs post-questioning")),
         ("chart", ch_fold_lines,
          dict(models=models, folds=folds, is_real=fold_is_real,
               title="A5  Per-Fold CV Accuracy")),
@@ -850,6 +879,8 @@ def build_all_figures(meta, diseases, symptoms, le,
 # ══════════════════════════════════════════════════════════════════════════════
 # 6.  CONSOLE REPORT
 # ══════════════════════════════════════════════════════════════════════════════
+
+# CHANGE 5: Updated console_report() to show both initial and final accuracy
 def console_report(meta, lang_results, topk_data):
     res  = meta["results"]; best = meta["best_model"]
     rand = 100/meta["n_diseases"]
@@ -859,13 +890,29 @@ def console_report(meta, lang_results, topk_data):
     print(f"\n  Dataset : {meta['data_source']}")
     print(f"  Classes : {meta['n_diseases']} diseases · {meta['n_symptoms']} symptoms")
     print(f"  Baseline: {rand:.2f}%  (random chance)")
+
     print(f"\n  A. Model Comparison")
-    print(f"  {'Model':<22} {'CV Mean':>9} {'±Std':>7} {'Test Acc':>10} {'vs Random':>10}")
-    print("  "+"-"*62)
-    for m in sorted(res, key=lambda x: res[x]["test_acc"], reverse=True):
-        r = res[m]
-        star = "★ " if m==best else "  "
-        print(f"  {star+m:<22} {r['cv_mean']*100:>8.2f}%  ±{r['cv_std']*100:.2f}%  {r['test_acc']*100:>8.2f}%  ×{r['test_acc']*100/rand:.0f}x")
+    # Check if we have final interactive accuracy
+    has_final = any("final_interactive_acc" in res[m] for m in res.keys())
+
+    if has_final:
+        print(f"  {'Model':<22} {'CV Mean':>9} {'±Std':>7} {'Initial':>9} {'Final':>9} {'Improve':>9}")
+        print("  "+"-"*72)
+        for m in sorted(res, key=lambda x: res[x].get("final_interactive_acc", res[x]["test_acc"]), reverse=True):
+            r = res[m]
+            star = "★ " if m==best else "  "
+            initial = r['test_acc']*100
+            final = r.get('final_interactive_acc', r['test_acc'])*100
+            improve = final - initial
+            print(f"  {star+m:<22} {r['cv_mean']*100:>8.2f}%  ±{r['cv_std']*100:.2f}%  {initial:>8.2f}%  {final:>8.2f}%  +{improve:>7.2f}%")
+    else:
+        print(f"  {'Model':<22} {'CV Mean':>9} {'±Std':>7} {'Test Acc':>10} {'vs Random':>10}")
+        print("  "+"-"*62)
+        for m in sorted(res, key=lambda x: res[x]["test_acc"], reverse=True):
+            r = res[m]
+            star = "★ " if m==best else "  "
+            print(f"  {star+m:<22} {r['cv_mean']*100:>8.2f}%  ±{r['cv_std']*100:.2f}%  {r['test_acc']*100:>8.2f}%  ×{r['test_acc']*100/rand:.0f}x")
+
     print(f"\n  C. Top-K Accuracy ({best})")
     for k, v in topk_data.get(best, {}).items():
         print(f"     Top-{k:>2}: {v:.2f}%")
@@ -890,12 +937,12 @@ def export_html(png_path, out_path, meta, diseases, symptoms, lang_results, topk
 
     best    = meta["best_model"]
     res     = meta["results"]
-    best_acc= res[best]["test_acc"]*100
+    best_acc= res[best].get("final_interactive_acc", res[best]["test_acc"])*100
     best_cv = res[best]["cv_mean"] *100
     best_std= res[best]["cv_std"]  *100
     rand    = 100/meta["n_diseases"]
     mult    = best_acc/rand
-    ranked  = sorted(res, key=lambda x: res[x]["test_acc"], reverse=True)
+    ranked  = sorted(res, key=lambda x: res[x].get("final_interactive_acc", res[x]["test_acc"]), reverse=True)
 
     model_rows = "\n".join(
         f'<tr class="{"winner" if m==best else ""}">'
@@ -903,8 +950,9 @@ def export_html(png_path, out_path, meta, diseases, symptoms, lang_results, topk
         f'<td>{res[m]["cv_mean"]*100:.2f}%</td>'
         f'<td>±{res[m]["cv_std"]*100:.2f}%</td>'
         f'<td>{res[m]["test_acc"]*100:.2f}%</td>'
-        f'<td>{(res[m]["test_acc"]-res[m]["cv_mean"])*100:+.2f}%</td>'
-        f'<td>×{res[m]["test_acc"]*100/rand:.0f}x</td>'
+        f'<td>{res[m].get("final_interactive_acc", res[m]["test_acc"])*100:.2f}%</td>'
+        f'<td>{(res[m].get("final_interactive_acc", res[m]["test_acc"]) - res[m]["cv_mean"])*100:+.2f}%</td>'
+        f'<td>×{res[m].get("final_interactive_acc", res[m]["test_acc"])*100/rand:.0f}x</td>'
         f'<td><span class="pill {"pb" if rk==1 else "pg" if rk==2 else "pr"}">'
         f'#{rk}{"  ★ BEST" if m==best else ""}</span></td></tr>'
         for rk, m in enumerate(ranked, 1)
@@ -1032,7 +1080,7 @@ footer{{margin-top:64px;padding-top:22px;border-top:1px solid var(--b);
 </header>
 
 <div class="kgrid">
-  <div class="kpi c"><div class="kl">Best Test Accuracy</div><div class="kv">{best_acc:.2f}%</div><div class="ks">{best} · 220 classes</div></div>
+  <div class="kpi c"><div class="kl">Best Final Accuracy</div><div class="kv">{best_acc:.2f}%</div><div class="ks">{best} · after interactive diagnosis</div></div>
   <div class="kpi p"><div class="kl">Best CV Mean</div><div class="kv">{best_cv:.2f}%</div><div class="ks">5-fold · σ=±{best_std:.2f}%</div></div>
   <div class="kpi a"><div class="kl">Disease Classes</div><div class="kv">{meta["n_diseases"]}</div><div class="ks">Rural orthopaedic conditions</div></div>
   <div class="kpi g"><div class="kl">Symptom Features</div><div class="kv">{meta["n_symptoms"]}</div><div class="ks">BERT-extracted signals</div></div>
@@ -1049,11 +1097,11 @@ footer{{margin-top:64px;padding-top:22px;border-top:1px solid var(--b);
 <img class="chart-img" src="data:image/png;base64,{b64}" alt="All empirical charts">
 
 <div class="sec"><div class="sec-t">SECTION A — MODEL COMPARISON TABLE</div>
-<div class="sec-s">3-model ensemble. All trained on same data, same 5-fold CV splits.</div></div>
+<div class="sec-s">3-model ensemble. All trained on same data, same 5-fold CV splits. Final accuracy = after interactive questioning.</div></div>
 <div class="card">
   <div class="ct">Model Performance Summary</div>
-  <div class="cs">Generalisation gap = test_acc − cv_mean. Positive = test beats CV (healthy). Negative = mild overfit.</div>
-  <table><thead><tr><th>Model</th><th>CV Mean</th><th>CV Std</th><th>Test Acc</th><th>Gen. Gap</th><th>vs Random</th><th>Rank</th></tr></thead>
+  <div class="cs">Initial = batch test_acc (all symptoms at once). Final = final_interactive_acc (after 3-5 questions). Gen. Gap = final − cv_mean.</div>
+  <table><thead><tr><th>Model</th><th>CV Mean</th><th>CV Std</th><th>Initial Acc</th><th>Final Acc</th><th>Gen. Gap</th><th>vs Random</th><th>Rank</th></tr></thead>
   <tbody>{model_rows}</tbody></table>
 </div>
 
@@ -1061,7 +1109,7 @@ footer{{margin-top:64px;padding-top:22px;border-top:1px solid var(--b);
 <div class="sec-s">For 220 classes, showing top-5 predictions to a reviewing doctor dramatically improves clinical utility.</div></div>
 <div class="card">
   <div class="ct">Top-K Accuracy per Model</div>
-  <div class="cs">{"Real values saved from training run." if topk_raw else "Estimated using realistic scaling from test accuracy. Save topk_accuracy to metadata.json for real values."}</div>
+  <div class="cs">{"Real values saved from training run." if topk_raw else "Estimated using realistic scaling from final interactive accuracy. Save topk_accuracy to metadata.json for real values."}</div>
   <table><thead><tr><th>Model</th><th>Top-1</th><th>Top-3</th><th>Top-5</th><th>Top-10</th></tr></thead>
   <tbody>{topk_rows}</tbody></table>
 </div>
@@ -1101,7 +1149,7 @@ footer{{margin-top:64px;padding-top:22px;border-top:1px solid var(--b);
 
 <footer>
   <span>NABHA RURAL HEALTHCARE AI · EMPIRICAL RESULTS</span>
-  <span>{best} · {best_acc:.2f}% · {meta["n_diseases"]} classes · 3 langs · active learning · offline-first</span>
+  <span>{best} · {best_acc:.2f}% final · {meta["n_diseases"]} classes · 3 langs · active learning · offline-first</span>
 </footer>
 </body></html>"""
 

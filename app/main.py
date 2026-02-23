@@ -457,6 +457,36 @@ def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest
             le,
             symptom_list
         )
+                # ───────── LOG REAL INTERACTIVE SESSION ─────────
+        if result.get("status") == "complete":
+
+            from datetime import datetime
+            import json
+
+            # Get best model name from metadata
+            model_name = request.app.state.metadata.get("best_model", "Unknown")
+
+            final_preds = result.get("final_predictions", [])
+
+            top1_disease = None
+            top1_conf = None
+
+            if final_preds:
+                top1_disease = final_preds[0].get("disease")
+                top1_conf = final_preds[0].get("confidence")
+
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "session_id": body.session_id,
+                "model_name": model_name,
+                "questions_asked": result.get("questions_asked", 0),
+                "final_prediction": top1_disease,
+                "confidence": top1_conf,
+                "stop_reason": result.get("stop_reason", "completed")
+            }
+
+            with open("interactive_sessions.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

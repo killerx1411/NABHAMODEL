@@ -21,7 +21,7 @@ SESSIONS = {}
 # ─────────────────────────────────────────────────────────────
 CONFIDENCE_THRESHOLD = 0.70  # Stop when top disease > 70%
 MAX_QUESTIONS = 5            # Max questions to ask
-MIN_INFORMATION_GAIN = 0.01  # Stop if no question provides meaningful info
+MIN_INFORMATION_GAIN = 0.00  # Stop if no question provides meaningful info
 
 
 # ─────────────────────────────────────────────────────────────
@@ -121,13 +121,19 @@ def calculate_entropy(probabilities: np.ndarray) -> float:
     return entropy(probs)
 
 
-def predict_with_symptoms(model, symptom_list: List[str],
-                          present_symptoms: List[str]) -> np.ndarray:
+def predict_with_symptoms(model, symptom_list, present_symptoms):
+
     vector = np.zeros(len(symptom_list))
+
     for symptom in present_symptoms:
         if symptom in symptom_list:
             idx = symptom_list.index(symptom)
             vector[idx] = 1
+
+    # Convert to DataFrame with feature names
+    df_vector = pd.DataFrame([vector], columns=symptom_list)
+
+    return model.predict_proba(df_vector)[0]
 
     # Pass numpy array directly instead of DataFrame — fixes pandas/xgboost mismatch
     return model.predict_proba(vector.reshape(1, -1))[0]
@@ -196,7 +202,7 @@ def select_next_question(
 
     # Calculate information gain for each unanswered symptom
     gains = {}
-    for symptom in unanswered_symptoms[:50]:  # Limit to top 50 for speed
+    for symptom in unanswered_symptoms[:5]:  # Limit to top 50 for speed
         ig = calculate_information_gain(
             model, symptom_list, present_symptoms, symptom, current_probs
         )
