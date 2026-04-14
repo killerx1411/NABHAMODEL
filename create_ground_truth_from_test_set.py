@@ -54,9 +54,9 @@ symptoms = list(joblib.load(SYMPTOMS_PATH))
 le       = joblib.load(LE_PATH)
 
 best_model_name = metadata["best_model"]
-print(f"   ✅ Model: {best_model_name}")
-print(f"   ✅ Symptoms: {len(symptoms)}")
-print(f"   ✅ Classes: {len(le.classes_)}\n")
+print(f"    Model: {best_model_name}")
+print(f"    Symptoms: {len(symptoms)}")
+print(f"    Classes: {len(le.classes_)}\n")
 
 
 # ── Load your original dataset ────────────────────────────────────────────────
@@ -78,7 +78,7 @@ if not os.path.exists(DATA_PATH):
 
 print(f"📂 Loading dataset from {DATA_PATH}...")
 df = pd.read_csv(DATA_PATH)
-print(f"   ✅ {len(df)} rows, columns: {list(df.columns[:8])}...")
+print(f"    {len(df)} rows, columns: {list(df.columns[:8])}...")
 
 # Separate features and labels
 if LABEL_COL not in df.columns:
@@ -196,7 +196,7 @@ avg_q       = total_questions / len(X)
 initial_acc = metadata["results"][best_model_name]["test_acc"]
 
 print(f"\n{'='*60}")
-print(f"✅ Simulation complete")
+print(f" Simulation complete")
 print(f"   Cases run:            {len(X)}")
 print(f"   Initial test_acc:     {initial_acc*100:.2f}%")
 print(f"   Real interactive acc: {real_acc*100:.2f}%")
@@ -220,7 +220,7 @@ metadata["results"][best_model_name]["final_interactive_acc"] = round(real_acc, 
 with open(METADATA_PATH, 'w') as f:
     json.dump(metadata, f, indent=2)
 
-print(f"\n✅ All done! Files written:")
+print(f"\n All done! Files written:")
 print(f"   {GROUND_TRUTH_OUT}  ({len(ground_truth)} entries)")
 print(f"   {SESSION_LOG_OUT}   ({len(session_entries)} sessions)")
 print(f"   {METADATA_PATH}     (final_interactive_acc updated to REAL value)")

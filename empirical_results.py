@@ -50,12 +50,14 @@ PATHS = {
 # ══════════════════════════════════════════════════════════════════════════════
 # 1.  COLOURS & STYLE
 # ══════════════════════════════════════════════════════════════════════════════
-BG     = "#0a0a0f"
-SURF   = "#111118"
-SURF2  = "#18181f"
-BORDER = "#2a2a38"
-TEXT   = "#e8e8f0"
-MUTED  = "#6b6b82"
+
+# AFTER
+BG     = "#ffffff"
+SURF   = "#f8f9fa"
+SURF2  = "#f0f1f3"
+BORDER = "#d0d0dc"
+TEXT   = "#1a1a2e"
+MUTED  = "#555566"
 CYAN   = "#00e5ff"
 PURPLE = "#7c3aed"
 AMBER  = "#f59e0b"
@@ -123,7 +125,7 @@ def load_all():
     diseases = jload(PATHS["diseases"])
     symptoms = list(joblib.load(PATHS["symptoms"]))
     le       = joblib.load(PATHS["le"])
-    print(f"   ✅ Core  → {meta['n_diseases']} diseases · {meta['n_symptoms']} symptoms")
+    print(f"    Core  → {meta['n_diseases']} diseases · {meta['n_symptoms']} symptoms")
 
     model, feat_imp = None, None
     if os.path.exists(PATHS["model"]):
@@ -131,12 +133,12 @@ def load_all():
             model = joblib.load(PATHS["model"])
             if hasattr(model, "feature_importances_"):
                 feat_imp = model.feature_importances_
-            print(f"   ✅ best_model.pkl → {type(model).__name__}")
+            print(f"    best_model.pkl → {type(model).__name__}")
         except Exception as e:
             print(f"   ⚠  best_model.pkl skipped ({e})")
 
     cm = np.load(PATHS["cm"]) if os.path.exists(PATHS["cm"]) else None
-    if cm is not None: print(f"   ✅ confusion_matrix.npy → {cm.shape}")
+    if cm is not None: print(f"    confusion_matrix.npy → {cm.shape}")
 
     fold_scores  = meta.get("fold_scores",   None)
     class_report = meta.get("class_report",  None)
@@ -150,7 +152,7 @@ def load_all():
         real_acc = meta["final_interactive_acc"] * 100
         avg_q    = meta.get("avg_questions_asked", 5.8)
         q_pct    = round((1 - avg_q / meta["n_symptoms"]) * 100, 1)
-        print(f"   ✅ Interactive data → acc={real_acc:.2f}%  avg_q={avg_q:.2f}")
+        print(f"    Interactive data → acc={real_acc:.2f}%  avg_q={avg_q:.2f}")
         # Update SYSTEM_METRICS with real values
         SYSTEM_METRICS = dict(SYSTEM_METRICS_STATIC)
         SYSTEM_METRICS["Avg Questions to 80% Conf"] = (
@@ -168,7 +170,7 @@ def load_all():
     real_lat = meta.get("best_model_latency_median_ms")
     real_p95 = meta.get("best_model_latency_p95_ms")
     if real_lat is not None:
-        print(f"   ✅ Real latency → median={real_lat} ms  p95={real_p95} ms")
+        print(f"    Real latency → median={real_lat} ms  p95={real_p95} ms")
         SYSTEM_METRICS["Inference Latency (XGBoost)"] = (
             real_lat, "ms", CYAN,
             f"Real · {meta['n_symptoms']} features · median of 1000 runs"
@@ -180,7 +182,7 @@ def load_all():
     for lang, key in [("Hindi","hi_meta"), ("Punjabi","pa_meta")]:
         if os.path.exists(PATHS[key]):
             lang_meta[lang] = jload(PATHS[key])
-            print(f"   ✅ {lang} metadata")
+            print(f"    {lang} metadata")
         else:
             print(f"   ⚠  {lang} not trained — will project")
 
@@ -312,14 +314,14 @@ def build_lang_results(lang_meta):
 # ─── A: Model Comparison (UNCHANGED) ─────────────────────────────────────────
 def ch_model_bar(ax, models, values, colors, ylabel, title, rand=None, hi=None):
     bars = ax.bar(models, values, color=[c+"88" for c in colors],
-                  edgecolor=colors, lw=1.8, width=0.5, zorder=3)
+                  edgecolor=colors, lw=1.8, width=0.09, zorder=3)
     ax.set_ylabel(ylabel, color=MUTED, fontsize=10)
     ax.set_title(title, color=TEXT, fontsize=12, pad=12)
     ax.grid(axis="y", zorder=0); clean_ax(ax)
     ax.set_ylim(0, max(values)*1.22); ax.tick_params(labelsize=11)
     for bar, v, col in zip(bars, values, colors):
         ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.6,
-                f"{v:.2f}%", ha="center", va="bottom", color=col, fontsize=10, fontweight="bold")
+        f"{v:.2f}%", ha="center", va="bottom", color=col, fontsize=14, fontweight="bold")
     if rand:
         ax.axhline(rand, color=RED, ls="--", lw=1.2, alpha=0.7, zorder=2)
         ax.text(len(models)-0.55, rand+0.5, f"Random {rand:.2f}%", color=RED, fontsize=8)
@@ -334,7 +336,7 @@ def ch_grouped_bar(ax, models, cv_m, t_acc, title):
     for brs, vals, col in [(b1,cv_m,PURPLE),(b2,t_acc,CYAN)]:
         for bar, v in zip(brs, vals):
             ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.4,
-                    f"{v:.1f}%", ha="center", va="bottom", color=col, fontsize=9)
+            f"{v:.1f}%", ha="center", va="bottom", color=col, fontsize=13, fontweight="bold")
     ax.set_xticks(x); ax.set_xticklabels(models, fontsize=10)
     ax.set_title(title, color=TEXT, fontsize=12, pad=12)
     ax.set_ylabel("Accuracy (%)", color=MUTED, fontsize=10)
@@ -574,17 +576,20 @@ def ch_qs_needed(ax, meta, title):
         # REAL multi-model grouped bars
         names   = list(im.keys())
         n       = len(names)
-        w       = 0.8 / n
+        w       = 0.3 / n
         offsets = np.linspace(-(n-1)*w/2, (n-1)*w/2, n)
         for i, name in enumerate(names):
             col  = MODEL_C.get(name, CYAN)
             d2   = im[name].get("d2_thresholds", {})
+            success = im[name].get("threshold_success_rate", {})
             vals = [float(d2.get(k, 0)) for k in thresh_keys]
             lbl  = f"{name} (best)" if name == best else name
             ax.bar(x + offsets[i], vals, w, color=col+"88",
                    edgecolor=col, lw=1.8, label=lbl, zorder=3)
             for xi, v in enumerate(vals):
-                ax.text(xi + offsets[i], v + 0.06, f"{v:.1f}",
+                s = float(success.get(thresh_keys[xi], 0))
+                label = f"{v:.1f} Q\n({s:.0f}%)"
+                ax.text(xi + offsets[i], v + 0.06, label,
                         ha="center", va="bottom", color=col, fontsize=8)
         ax.set_title(title + "\n[REAL — all models]", color=TEXT, fontsize=12, pad=12)
     elif im and len(im) == 1:
@@ -1004,7 +1009,7 @@ def console_report(meta, lang_results, topk_data):
             final = round(real_final * ratio * 100, 2)
             print(f"  {star+m:<22} {r['cv_mean']*100:>8.2f}%  ±{r['cv_std']*100:.2f}%  "
                   f"{r['test_acc']*100:>8.2f}%  {final:>8.2f}%")
-        print(f"\n  ✅ Real final_interactive_acc = {real_final*100:.2f}%  [top-level metadata key]")
+        print(f"\n   Real final_interactive_acc = {real_final*100:.2f}%  [top-level metadata key]")
     else:
         print(f"  {'Model':<22} {'CV Mean':>9} {'±Std':>7} {'Test Acc':>10} {'vs Random':>10}")
         print("  "+"-"*62)
@@ -1086,7 +1091,7 @@ def export_html(png_path, out_path, meta, diseases, symptoms, lang_results, topk
         f'<tr><td><b>{lang}</b>{"" if lr["real"] else " <span class=pill_warn>⚠ projected</span>"}</td>'
         f'<td>{lr["cv_mean"]:.2f}%</td>'
         f'<td>{lr["test_acc"]:.2f}%</td>'
-        f'<td>{"✅ Real" if lr["real"] else "⚠ Projected"}</td></tr>'
+        f'<td>{" Real" if lr["real"] else "⚠ Projected"}</td></tr>'
         for lang, lr in lang_results.items()
     )
 
@@ -1115,7 +1120,7 @@ def export_html(png_path, out_path, meta, diseases, symptoms, lang_results, topk
           <tr><td>Symptom space reduction</td>
               <td class="c">{q_pct}%</td><td class="a">—</td><td class="m">—</td></tr>
         """
-        al_note = f"✅ REAL values from interactive engine evaluation ({meta.get('seed_symptoms', 2)} seed symptoms)."
+        al_note = f" REAL values from interactive engine evaluation ({meta.get('seed_symptoms', 2)} seed symptoms)."
     else:
         al_rows = """
           <tr><td>Initial confidence (0 questions)</td><td class="c">48.6%</td><td class="a">46.4%</td><td class="m">24.0%</td></tr>
@@ -1304,7 +1309,7 @@ def main():
     export_html(PATHS["out_png"], PATHS["out_html"],
                 meta, diseases, symptoms, lang_res, topk_data, topk_raw)
 
-    print(f"\n✅ Done!")
+    print(f"\n Done!")
     print(f"   PNG  : {PATHS['out_png']}")
     print(f"   HTML : {PATHS['out_html']}")
     try:

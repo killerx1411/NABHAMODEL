@@ -150,8 +150,9 @@ def predict_with_symptoms(
     # No change needed to the vector itself, but the tracking enables
     # correct information gain calculation below.
 
-    df_vector = pd.DataFrame([vector], columns=symptom_list)
-    return model.predict_proba(df_vector)[0]
+    # Use a raw 2D numpy array for inference to avoid pandas/xgboost
+    # compatibility edge cases with certain model artifacts/environments.
+    return model.predict_proba(vector.reshape(1, -1))[0]
 
 
 # FIX 2: calculate_information_gain now computes BOTH yes AND no branches.

@@ -141,4 +141,4 @@ df_report.to_csv(f"{RESULTS_DIR}/classification_report_english.csv")
 
 print("📋 Saved classification report.")
 
-print("\n✅ ALL RESULTS GENERATED IN /results FOLDER")
+print("\n ALL RESULTS GENERATED IN /results FOLDER")

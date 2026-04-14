@@ -97,7 +97,7 @@ def main():
         print(f"❌ No sessions found in {SESSION_LOG_PATH}")
         return
 
-    print(f"✅ Loaded {len(sessions)} interactive sessions")
+    print(f" Loaded {len(sessions)} interactive sessions")
 
     # ── Load ground truth ──────────────────────────────────────
     if not os.path.exists(GROUND_TRUTH_PATH):
@@ -109,7 +109,7 @@ def main():
     with open(GROUND_TRUTH_PATH) as f:
         ground_truth = json.load(f)
 
-    print(f"✅ Loaded {len(ground_truth)} ground truth labels")
+    print(f" Loaded {len(ground_truth)} ground truth labels")
 
     # ── Build dataframe ────────────────────────────────────────
     df = pd.DataFrame(sessions)
@@ -127,7 +127,7 @@ def main():
         print("❌ No sessions could be matched to ground truth. Cannot compute accuracy.")
         return
 
-    print(f"✅ {len(matched)} sessions matched to ground truth\n")
+    print(f" {len(matched)} sessions matched to ground truth\n")
 
     # ── Calculate accuracy per model ───────────────────────────
     print("="*60)
@@ -185,7 +185,7 @@ def main():
     with open(METADATA_PATH, 'w') as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✅ Done! Updated: {', '.join(updated_models)}")
+    print(f" Done! Updated: {', '.join(updated_models)}")
     print("\n🚀 Now run:  python empirical_results.py")
     print("   Charts will show your REAL final accuracy (not simulated).")
 

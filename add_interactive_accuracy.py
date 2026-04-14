@@ -80,10 +80,10 @@ def load_model(name):
     fname = MODEL_FILE_MAP.get(name)
     path  = os.path.join(MODEL_DIR, fname) if fname else None
     if path and os.path.exists(path):
-        print(f"   ✅ {name} → {fname}")
+        print(f"    {name} → {fname}")
         return joblib.load(path)
     if name == best_name:
-        print(f"   ✅ {name} → best_model.pkl (fallback)")
+        print(f"    {name} → best_model.pkl (fallback)")
         return joblib.load(os.path.join(MODEL_DIR, "best_model.pkl"))
     print(f"   ⚠  {name} → no .pkl found, skipping")
     return None
@@ -198,16 +198,38 @@ def evaluate_model(name, model):
     final_acc = correct / n
     avg_q     = total_q / n
     max_step  = max(conf_by_step.keys())
+
     d1_steps  = list(range(max_step + 1))
     d1_confs  = [float(np.mean(conf_by_step[s])) * 100 for s in d1_steps]
-    d2_data   = {str(t): float(np.mean(threshold_qs[t])) for t in THRESHOLDS}
 
-    print(f"   ✅ acc={final_acc*100:.2f}%  avg_q={avg_q:.2f}\n")
+    # ─────────────────────────────────────────────
+    # Compute Q̅(τ) AND success % within Q ≤ MAX_LOOP
+    # ─────────────────────────────────────────────
+    d2_data = {}
+    threshold_success = {}
+
+    for t in THRESHOLDS:
+        qs = threshold_qs[t]
+        avg_q_tau = float(np.mean(qs))
+
+        # % reaching threshold within question budget
+        success_count = sum(1 for q in qs if q <= MAX_LOOP)
+        success_rate  = (success_count / n) * 100
+
+        d2_data[str(t)] = round(avg_q_tau, 3)
+        threshold_success[str(t)] = round(success_rate, 2)
+
+    print(f"    acc={final_acc*100:.2f}%  avg_q={avg_q:.2f}")
+    for t in THRESHOLDS:
+        print(f"      τ={t:.1f}  Q̅={d2_data[str(t)]:.2f}  "
+              f"%≤{MAX_LOOP}={threshold_success[str(t)]:.1f}%")
+    print()
 
     return {
         "d1_steps":      d1_steps,
         "d1_confidence": d1_confs,
         "d2_thresholds": d2_data,
+        "threshold_success_rate": threshold_success,
         "final_acc":     round(final_acc, 4),
         "avg_questions": round(avg_q, 2),
     }
@@ -228,6 +250,8 @@ metadata["seed_symptoms"]             = SEED_SYMPTOMS
 metadata["interactive_d1_steps"]      = best_result["d1_steps"]
 metadata["interactive_d1_confidence"] = best_result["d1_confidence"]
 metadata["interactive_d2_thresholds"] = best_result["d2_thresholds"]
+metadata["interactive_threshold_success"] = best_result["threshold_success_rate"]
+metadata["interactive_models"] = all_results
 
 # Per-model curves — what empirical_results.py now reads for D1/D2
 metadata["interactive_models"] = all_results

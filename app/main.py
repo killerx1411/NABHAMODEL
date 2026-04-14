@@ -19,6 +19,7 @@ import joblib
 import json
 import os
 import logging
+import re
 
 
 
@@ -46,13 +47,33 @@ async def lifespan(app: FastAPI):
         "symptom_list": joblib.load(os.path.join(MODEL_DIR, "symptom_list.pkl")),
         "metadata": json.load(open(os.path.join(MODEL_DIR, "metadata.json")))
     }
-    logger.info(f"✅ English model loaded: {app.state.models['en']['metadata']['n_diseases']} diseases")
+    logger.info(f" English model loaded: {app.state.models['en']['metadata']['n_diseases']} diseases")
     
     # For backward compatibility with interactive diagnosis, set these at app.state level
     app.state.model = app.state.models["en"]["model"]
     app.state.le = app.state.models["en"]["le"]
     app.state.symptom_list = app.state.models["en"]["symptom_list"]
     app.state.metadata = app.state.models["en"]["metadata"]
+    def _load_stage2_models(base_path: str, lang_key: str):
+        stage2 = {"avn": None, "oa": None, "fracture": None}
+        try:
+            stage2["avn"] = joblib.load(os.path.join(base_path, "avn_model.pkl"))
+            logger.info(f" Loaded {lang_key} avn_model.pkl")
+        except FileNotFoundError:
+            logger.warning(f"⚠️ {lang_key} avn_model.pkl not found. Stage-2 AVN prediction disabled.")
+        try:
+            stage2["oa"] = joblib.load(os.path.join(base_path, "oa_model.pkl"))
+            logger.info(f" Loaded {lang_key} oa_model.pkl")
+        except FileNotFoundError:
+            logger.warning(f"⚠️ {lang_key} oa_model.pkl not found. Stage-2 OA prediction disabled.")
+        try:
+            stage2["fracture"] = joblib.load(os.path.join(base_path, "fracture_model.pkl"))
+            logger.info(f" Loaded {lang_key} fracture_model.pkl")
+        except FileNotFoundError:
+            logger.warning(f"⚠️ {lang_key} fracture_model.pkl not found. Stage-2 fracture prediction disabled.")
+        return stage2
+
+    app.state.models["en"]["stage2"] = _load_stage2_models(MODEL_DIR, "en")
     
     # Hindi model
     try:
@@ -60,9 +81,10 @@ async def lifespan(app: FastAPI):
             "model": joblib.load(os.path.join(MODEL_DIR, "hindi", "best_model.pkl")),
             "le": joblib.load(os.path.join(MODEL_DIR, "hindi", "label_encoder.pkl")),
             "symptom_list": joblib.load(os.path.join(MODEL_DIR, "hindi", "symptom_list.pkl")),
-            "metadata": json.load(open(os.path.join(MODEL_DIR, "hindi", "metadata.json"), encoding='utf-8'))
+            "metadata": json.load(open(os.path.join(MODEL_DIR, "hindi", "metadata.json"), encoding='utf-8')),
+            "stage2": _load_stage2_models(os.path.join(MODEL_DIR, "hindi"), "hi")
         }
-        logger.info(f"✅ Hindi model loaded: {app.state.models['hi']['metadata']['n_diseases']} diseases")
+        logger.info(f" Hindi model loaded: {app.state.models['hi']['metadata']['n_diseases']} diseases")
     except FileNotFoundError:
         logger.warning("⚠️  Hindi model not found. Run train_hindi.py first.")
         app.state.models["hi"] = None
@@ -73,9 +95,10 @@ async def lifespan(app: FastAPI):
             "model": joblib.load(os.path.join(MODEL_DIR, "punjabi", "best_model.pkl")),
             "le": joblib.load(os.path.join(MODEL_DIR, "punjabi", "label_encoder.pkl")),
             "symptom_list": joblib.load(os.path.join(MODEL_DIR, "punjabi", "symptom_list.pkl")),
-            "metadata": json.load(open(os.path.join(MODEL_DIR, "punjabi", "metadata.json"), encoding='utf-8'))
+            "metadata": json.load(open(os.path.join(MODEL_DIR, "punjabi", "metadata.json"), encoding='utf-8')),
+            "stage2": _load_stage2_models(os.path.join(MODEL_DIR, "punjabi"), "pa")
         }
-        logger.info(f"✅ Punjabi model loaded: {app.state.models['pa']['metadata']['n_diseases']} diseases")
+        logger.info(f" Punjabi model loaded: {app.state.models['pa']['metadata']['n_diseases']} diseases")
     except FileNotFoundError:
         logger.warning("⚠️  Punjabi model not found. Run train_punjabi.py first.")
         app.state.models["pa"] = None
@@ -128,10 +151,36 @@ def confidence_label(score: float) -> str:
 
 def extract_symptoms_from_text(text: str, symptom_list: List[str]) -> List[str]:
     """
-    Extract symptoms from natural language text by case-insensitive substring match.
+    Extract symptoms from natural language text.
+    Keeps existing substring behavior, with light normalization for phrasing variants
+    like "thinning of bones" -> "bone thinning".
     """
     text_lower = text.lower()
-    return [symptom for symptom in symptom_list if symptom.lower() in text_lower]
+    normalized_text = re.sub(r"[^a-z0-9\s]", " ", text_lower)
+    text_tokens = set(t for t in normalized_text.split() if t)
+    stop_words = {"of", "the", "and", "a", "an", "to", "with", "in", "on", "for"}
+
+    found = []
+    for symptom in symptom_list:
+        symptom_lower = symptom.lower()
+
+        # Stage 1: original exact substring behavior
+        if symptom_lower in text_lower:
+            found.append(symptom)
+            continue
+
+        # Stage 2: token-level match for minor word-order/connector differences
+        normalized_symptom = re.sub(r"[^a-z0-9\s]", " ", symptom_lower)
+        symptom_tokens = [t for t in normalized_symptom.split() if t and t not in stop_words]
+        if len(symptom_tokens) < 2:
+            continue
+
+        symptom_token_set = set(symptom_tokens)
+        overlap = len(symptom_token_set.intersection(text_tokens))
+        if overlap >= 2 and (overlap / len(symptom_token_set)) >= 0.66:
+            found.append(symptom)
+
+    return found
 
 
 def _resolve_model(request: Request, lang: str):
@@ -151,6 +200,86 @@ def _resolve_model(request: Request, lang: str):
         model_data["metadata"],
         lang,
     )
+
+
+def _vector_df_from_symptoms(symptoms: List[str], symptom_list: List[str]):
+    vector = np.zeros(len(symptom_list))
+    for s in symptoms:
+        if s in symptom_list:
+            vector[symptom_list.index(s)] = 1
+    return pd.DataFrame([vector], columns=symptom_list)
+
+
+def _safe_max_confidence(model, X):
+    if model is None or not hasattr(model, "predict_proba"):
+        return None
+    try:
+        probs = model.predict_proba(X)
+        if probs is None or len(probs) == 0:
+            return None
+        row = probs[0]
+        if len(row) == 0:
+            return None
+        return round(float(np.max(row)) * 100, 2)
+    except Exception:
+        return None
+
+
+def _predict_exact_for_group(request: Request, group: str, X, lang: str = "en"):
+    model_data = request.app.state.models.get(lang) or request.app.state.models.get("en")
+    stage2 = model_data.get("stage2", {}) if model_data else {}
+
+    if group == "Avascular Necrosis":
+        sub_model = stage2.get("avn")
+    elif group == "Osteoarthritis":
+        sub_model = stage2.get("oa")
+    elif group == "Hip & Bone Fracture":
+        sub_model = stage2.get("fracture")
+    elif group == "Other Orthopaedic":
+        return None, None
+    else:
+        return None, None
+
+    if sub_model is None:
+        return None, None
+
+    try:
+        exact_disease = sub_model.predict(X)[0]
+    except Exception:
+        return None, None
+
+    return exact_disease, _safe_max_confidence(sub_model, X)
+
+
+def _attach_stage2_interactive_fields(request: Request, result: dict, symptom_list: List[str]):
+    predictions = (
+        result.get("current_predictions")
+        or result.get("final_predictions")
+        or result.get("updated_predictions")
+        or []
+    )
+    if not predictions:
+        result["group"] = None
+        result["group_confidence"] = None
+        result["exact_disease"] = None
+        result["exact_confidence"] = None
+        return result
+
+    group = predictions[0].get("disease")
+    group_confidence = predictions[0].get("confidence")
+
+    session_id = result.get("session_id")
+    session = SESSIONS.get(session_id, {})
+    lang = result.get("language") or session.get("lang", "en")
+    present_symptoms = session.get("present_symptoms", [])
+    vector_df = _vector_df_from_symptoms(present_symptoms, symptom_list)
+    exact_disease, exact_confidence = _predict_exact_for_group(request, group, vector_df, lang=lang)
+
+    result["group"] = group
+    result["group_confidence"] = group_confidence
+    result["exact_disease"] = exact_disease
+    result["exact_confidence"] = exact_confidence
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -179,6 +308,10 @@ class PredictResponse(BaseModel):
     predictions: List[PredictionResult]
     detected_language: str
     language_name: str
+    group: Optional[str] = None
+    group_confidence: Optional[float] = None
+    exact_disease: Optional[str] = None
+    exact_confidence: Optional[float] = None
     model_used: str
     warning: Optional[str] = None
 
@@ -318,8 +451,17 @@ def predict(request: Request, body: PredictRequest):
             vector[symptom_list.index(s)] = 1
     
     # Predict
-    
+    group = model.predict(vector.reshape(1, -1))[0]
     probs = model.predict_proba(vector.reshape(1, -1))[0]
+    group_confidence = None
+    try:
+        group_idx = le.transform([group])[0]
+        group_confidence = round(float(probs[group_idx]) * 100, 2)
+    except Exception:
+        group_confidence = round(float(np.max(probs)) * 100, 2)
+
+    vector_df = pd.DataFrame([vector], columns=symptom_list)
+    exact_disease, exact_confidence = _predict_exact_for_group(request, group, vector_df, lang=lang)
     
     # Top 3
     top3_idx = np.argsort(probs)[::-1][:3]
@@ -340,6 +482,10 @@ def predict(request: Request, body: PredictRequest):
         predictions=predictions,
         detected_language=lang,
         language_name=lang_names.get(lang, "English"),
+        group=group,
+        group_confidence=group_confidence,
+        exact_disease=exact_disease,
+        exact_confidence=exact_confidence,
         model_used=metadata["best_model"],
         warning=f"Found {len(found_symptoms)} symptoms: {', '.join(found_symptoms[:5])}"
     )
@@ -390,7 +536,7 @@ def start_interactive_diagnosis(request: Request, body: InteractiveStartRequest)
 
     # ── create session with language ──────────────────────────
     result = create_session(model, le, symptom_list, recognized, lang=lang)
-    return result
+    return _attach_stage2_interactive_fields(request, result, symptom_list)
 
 
 @app.post("/predict_interactive/answer", tags=["Interactive Diagnosis"])
@@ -422,7 +568,7 @@ def answer_interactive_question(request: Request, body: InteractiveAnswerRequest
             le,
             symptom_list
         )
-        return result
+        return _attach_stage2_interactive_fields(request, result, symptom_list)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -487,7 +633,7 @@ def add_text_to_active_session(request: Request, body: InteractiveAddTextRequest
 
             with open("interactive_sessions.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-        return result
+        return _attach_stage2_interactive_fields(request, result, symptom_list)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -576,7 +722,7 @@ def interactive_demo_page():
 </head>
 <body>
     <div class="container">
-        <h1>🏥 Interactive Disease Diagnosis</h1>
+        <h1> Interactive Disease Diagnosis</h1>
         <p>Describe your symptoms in English, Hindi, or Punjabi. Follow-up questions will appear in the same language.</p>
 
         <div id="step1" class="step">
@@ -611,7 +757,7 @@ def interactive_demo_page():
             </div>
 
             <div id="complete" class="complete" style="display:none;">
-                <h3>✅ Diagnosis Complete</h3>
+                <h3> Diagnosis Complete</h3>
                 <p id="stopReason"></p>
                 <p id="questionsAsked"></p>
                 <button class="btn-start" onclick="location.reload()">Start New Diagnosis</button>
@@ -673,18 +819,21 @@ def interactive_demo_page():
             if (!response.ok) { alert(JSON.stringify(data.detail)); return; }
 
             document.getElementById('addTextInput').value = '';
+            displayResults(data);
+        }
 
-            const predictions = data.updated_predictions;
-            let html = '';
-            predictions.forEach(p => {
-                html += `<div class="disease"><strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence</div>`;
-            });
-            document.getElementById('predictions').innerHTML = html;
+        function renderHierarchicalResult(data) {
+            const group = data.group || 'N/A';
+            const groupConf = (data.group_confidence ?? null) !== null ? `${data.group_confidence}%` : 'N/A';
+            const exact = data.exact_disease || 'N/A';
+            const exactConf = (data.exact_confidence ?? null) !== null ? `${data.exact_confidence}%` : 'N/A';
+
+            return `<div class="disease"><strong>Stage 1 Group:</strong> ${group} (${groupConf})<br><strong>Stage 2 Exact Disease:</strong> ${exact} (${exactConf})</div>`;
         }
 
         function displayResults(data) {
-            const predictions = data.current_predictions || data.final_predictions;
-            let html = '';
+            const predictions = data.current_predictions || data.final_predictions || data.updated_predictions || [];
+            let html = renderHierarchicalResult(data);
             predictions.forEach(p => {
                 html += `<div class="disease"><strong>${p.rank}. ${p.disease}</strong> — ${p.confidence}% confidence</div>`;
             });

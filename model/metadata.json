@@ -1,59 +1,62 @@
 {
-  "best_model": "Random Forest",
+  "best_model": "XGBoost",
   "results": {
     "Random Forest": {
-      "cv_mean": 0.9799,
-      "cv_std": 0.0081,
-      "test_acc": 0.9725,
+      "cv_mean": 0.9742,
+      "cv_std": 0.0055,
+      "test_acc": 0.9853,
+      "macro_f1": 0.984,
       "fold_scores": [
-        0.9828080229226361,
-        0.9713467048710601,
-        0.9742120343839542,
-        0.994269340974212,
-        0.9770773638968482
+        0.967741935483871,
+        0.9769585253456221,
+        0.9815668202764977,
+        0.967741935483871,
+        0.9769585253456221
       ]
     },
     "Gradient Boosting": {
-      "cv_mean": 0.9788,
-      "cv_std": 0.0082,
-      "test_acc": 0.9703,
+      "cv_mean": 0.9696,
+      "cv_std": 0.0055,
+      "test_acc": 0.9779,
+      "macro_f1": 0.9772,
       "fold_scores": [
-        0.9799426934097422,
-        0.9713467048710601,
-        0.9742120343839542,
-        0.994269340974212,
-        0.9742120343839542
+        0.9631336405529954,
+        0.9723502304147466,
+        0.9769585253456221,
+        0.9631336405529954,
+        0.9723502304147466
       ]
     },
     "XGBoost": {
-      "cv_mean": 0.9799,
-      "cv_std": 0.0087,
-      "test_acc": 0.9725,
+      "cv_mean": 0.976,
+      "cv_std": 0.0045,
+      "test_acc": 0.9853,
+      "macro_f1": 0.984,
       "fold_scores": [
-        0.9856733524355301,
-        0.9713467048710601,
-        0.9742120343839542,
-        0.994269340974212,
-        0.9742120343839542
+        0.967741935483871,
+        0.9769585253456221,
+        0.9815668202764977,
+        0.9769585253456221,
+        0.9769585253456221
       ]
     }
   },
   "n_symptoms": 159,
   "n_diseases": 4,
-  "train_size": 1745,
-  "test_size": 437,
-  "data_source": "BERT dataset — 4 classes, all 2182 rows used",
+  "train_size": 1085,
+  "test_size": 272,
+  "data_source": "BERT dataset \u2014 4 classes, AVN undersampled to balance",
   "class_report": {
     "Avascular Necrosis": {
-      "precision": 0.984,
-      "recall": 0.968503937007874,
-      "f1-score": 0.9761904761904762,
-      "support": 254.0
+      "precision": 0.967032967032967,
+      "recall": 0.9887640449438202,
+      "f1-score": 0.9777777777777777,
+      "support": 89.0
     },
     "Hip & Bone Fracture": {
-      "precision": 0.9836065573770492,
-      "recall": 0.9523809523809523,
-      "f1-score": 0.967741935483871,
+      "precision": 1.0,
+      "recall": 0.9682539682539683,
+      "f1-score": 0.9838709677419355,
       "support": 63.0
     },
     "Osteoarthritis": {
@@ -63,131 +66,148 @@
       "support": 81.0
     },
     "Other Orthopaedic": {
-      "precision": 0.8444444444444444,
+      "precision": 0.9743589743589743,
       "recall": 0.9743589743589743,
-      "f1-score": 0.9047619047619048,
+      "f1-score": 0.9743589743589743,
       "support": 39.0
     },
-    "accuracy": 0.9725400457665904,
+    "accuracy": 0.9852941176470589,
     "macro avg": {
-      "precision": 0.9530127504553735,
-      "recall": 0.9738109659369502,
-      "f1-score": 0.962173579109063,
-      "support": 437.0
+      "precision": 0.9853479853479854,
+      "recall": 0.9828442468891907,
+      "f1-score": 0.984001929969672,
+      "support": 272.0
     },
     "weighted avg": {
-      "precision": 0.9744543396981407,
-      "recall": 0.9725400457665904,
-      "f1-score": 0.9730110690470918,
-      "support": 437.0
+      "precision": 0.9855365223012282,
+      "recall": 0.9852941176470589,
+      "f1-score": 0.9853165190807507,
+      "support": 272.0
     }
   },
-  "cv_mean": 0.9799,
-  "cv_std": 0.0081,
-  "test_accuracy": 0.9725,
-  "final_interactive_acc": 0.9833,
-  "avg_questions_asked": 1.75,
-  "seed_symptoms": 2,
-  "interactive_d1_steps": [
-    0,
-    1,
-    2,
-    3,
-    4,
-    5
-  ],
-  "interactive_d1_confidence": [
-    72.6035,
-    65.87285714285714,
-    65.87285714285714,
-    65.87285714285714,
-    65.87285714285714,
-    65.87285714285714
-  ],
-  "interactive_d2_thresholds": {
-    "0.6": 0.5333333333333333,
-    "0.7": 2.8,
-    "0.8": 6.533333333333333,
-    "0.9": 8.0
-  },
-  "interactive_models": {
-    "Random Forest": {
-      "d1_steps": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
+  "cv_mean": 0.976,
+  "cv_std": 0.0045,
+  "test_accuracy": 0.9853,
+  "macro_f1": 0.984,
+  "stage2_models": {
+    "Avascular Necrosis": {
+      "status": "trained",
+      "n_rows": 443,
+      "n_exact_classes": 17,
+      "exact_classes": [
+        "Arthritic Hip",
+        "Arthritic Hip (Acetabular Fracture)",
+        "Avascular Necrosis",
+        "Avascular Necrosis Of Bilateral Hips",
+        "Avascular Necrosis Of Hip",
+        "Avascular Necrosis Of The Left Hip",
+        "Avascular Necrosis Of The Right Hip",
+        "Bone Marrow Edema Syndrome Of Bilateral Hips",
+        "Bone Marrow Edema Syndrome Of The Left Hip",
+        "Bone Marrow Edema Syndrome Of The Right Hip",
+        "Developmental Dysplasia Of The Hip (Ddh)",
+        "Dynamic Hip Screw Post-Trauma",
+        "Dysplasia",
+        "Infected Hip",
+        "Post-Traumatic Hip Injury",
+        "Trochlea Dysplasia Staging",
+        "Tuberculosis Of Hip"
       ],
-      "d1_confidence": [
-        72.6035,
-        65.87285714285714,
-        65.87285714285714,
-        65.87285714285714,
-        65.87285714285714,
-        65.87285714285714
-      ],
-      "d2_thresholds": {
-        "0.6": 0.5333333333333333,
-        "0.7": 2.8,
-        "0.8": 6.533333333333333,
-        "0.9": 8.0
-      },
-      "final_acc": 0.9833,
-      "avg_questions": 1.75
+      "model_file": "avn_model.pkl"
     },
-    "Gradient Boosting": {
-      "d1_steps": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
+    "Osteoarthritis": {
+      "status": "trained",
+      "n_rows": 403,
+      "n_exact_classes": 29,
+      "exact_classes": [
+        "Arthritis",
+        "Arthritis Prediction Post Arthroplasty",
+        "Arthritis Prediction Post Discectomy",
+        "Arthritis Progression",
+        "Arthritiss, Reoperation, Perioperative Parameters",
+        "Diagnosis Of Osteoarthritis From Gait Analysis",
+        "Diagnosis Osteoarthritis From Mri",
+        "Identifying Gait Features Of Oa",
+        "Osteoarthritis",
+        "Osteoarthritis  Rt.",
+        "Osteoarthritis +Acetabulum Femoral Stem",
+        "Osteoarthritis Diagnosis & Severity",
+        "Osteoarthritis Diagnosis From Mri",
+        "Osteoarthritis Diagnosis From Radiograph",
+        "Osteoarthritis Diagnosis From X-Rays",
+        "Osteoarthritis Diagnosis With Infrared",
+        "Osteoarthritis Gait Analysis",
+        "Osteoarthritis Of The Right Side",
+        "Osteoarthritis Progression",
+        "Osteoarthritis Risk Prediction",
+        "Osteoarthritis Severity",
+        "Osteoarthritis Severity From Gait",
+        "Osteoarthritis Severity From Radiographs",
+        "Osteoarthritis Severity Scoring",
+        "Rheumatoid Arthritis",
+        "Rheumatoid Arthritis  Lt.",
+        "Rheumatoid Arthritis Rt.",
+        "Rheumatoid Arthritis.",
+        "Rheumatoid Arthritislt."
       ],
-      "d1_confidence": [
-        91.3685,
-        56.603333333333325,
-        56.603333333333325,
-        56.603333333333325,
-        56.603333333333325,
-        56.603333333333325
-      ],
-      "d2_thresholds": {
-        "0.6": 0.26666666666666666,
-        "0.7": 0.4,
-        "0.8": 0.6666666666666666,
-        "0.9": 3.3333333333333335
-      },
-      "final_acc": 0.7833,
-      "avg_questions": 0.25
+      "model_file": "oa_model.pkl"
     },
-    "XGBoost": {
-      "d1_steps": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
+    "Hip & Bone Fracture": {
+      "status": "trained",
+      "n_rows": 317,
+      "n_exact_classes": 49,
+      "exact_classes": [
+        "Acetabular Fracture",
+        "Acetabular Fracture / Femur Fracture",
+        "Ankle Fracture Detection",
+        "Bone Mineral Density Prediction From Questionnaire",
+        "Compression Fracture Diagnosis From Ct",
+        "Diagnosing Hip Fractures From X-Ray",
+        "Diagnosis And Detection Of Fracture",
+        "Failed Trochanter Fracture",
+        "Femur Fracture Classification",
+        "Fracture Detection From Radiographs",
+        "Fracture Healing Time",
+        "Fracture Identification From Ct",
+        "Fracture Identification From Radiograph",
+        "Fracture Prediction",
+        "Fracture Risk From Patient Factors",
+        "Hip And Vertebral Fracture Prediction With Inhaled Corticosteroid Use",
+        "Hip Fracture",
+        "Hip Fracture + Hospital Process Variables",
+        "Hip Fracture Detection",
+        "Hip Fracture Prediction",
+        "Hip Fracture Risk",
+        "Identify Vertebrae At Risk Of Insufficiency Fractures",
+        "Lumbar Spine Fracture Detection From Dexa Scan",
+        "Mortality After Fractures",
+        "Mortality Post Intertrochanteric Fracture",
+        "Neck Of Femur Fracture",
+        "Neck Of Femur Fracture + Shaft Non-Union",
+        "Neck Of Femur Fracture Detection",
+        "Neglected Acetabular Fracture",
+        "Neglected Neck Of Femur Fracture",
+        "Non-Union Fracture Healing",
+        "Osteoporosis",
+        "Osteoporosis Classification",
+        "Osteoporosis Diagnosi From Radiograph",
+        "Osteoporosis Diagnosis From Ct",
+        "Osteoporosis Diagnosis From Dexa",
+        "Osteoporosis Diagnosis From Radiograph",
+        "Osteoporotic Fractures",
+        "Pathological Fracture Prediction",
+        "Post Acetabular Fracture",
+        "Predicting Cost Post Hip Fracture",
+        "Predicting Fracture Risk",
+        "Predicting Osteoporosis From Qct",
+        "Predicting Return To Home After Hip Fracture",
+        "Predicting Vertebral Strenght From Qct",
+        "Risk Of Hip Fracture Prediction",
+        "Trochanter Fracture",
+        "Vertebral Compression Fracture Benign Vs Malignant Mri",
+        "Vertebral Compression Fractures"
       ],
-      "d1_confidence": [
-        86.899,
-        54.30500000000001,
-        54.30500000000001,
-        54.30500000000001,
-        54.30500000000001,
-        54.30500000000001
-      ],
-      "d2_thresholds": {
-        "0.6": 0.4,
-        "0.7": 0.5333333333333333,
-        "0.8": 1.2,
-        "0.9": 4.0
-      },
-      "final_acc": 0.95,
-      "avg_questions": 0.33
+      "model_file": "fracture_model.pkl"
     }
   }
 }
